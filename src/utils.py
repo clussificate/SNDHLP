@@ -15,3 +15,5 @@ def parse_results(model: gp.Model) -> None:
     for name, val in zip(model.getAttr("varName"), model.getAttr("x")):
         print("Var {}: {}".format(name, val))
 
+    for con, val in zip(model.getAttr("constrName"), model.getAttr("Pi")):
+        print("Dual var of {}: {}".format(con, val))

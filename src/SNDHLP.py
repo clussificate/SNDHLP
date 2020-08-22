@@ -97,14 +97,14 @@ class SNDHLP:
         self.model.update()
 
         # add constraints
-        self.c1 = self.model.addConstrs((self.h[self.H_to_label[hf]] == 1 for hf in self.H_f))
-        self.c2 = self.model.addConstr(sum([x for _, x in self.h.items()]), GRB.LESS_EQUAL, self.n_H)
-        self.c3 = self.model.addConstrs((self.y.sum(self.r_to_label[r], "*") == 1 for r in self.R.keys()))
+        self.c1 = self.model.addConstrs((self.h[h_id] == 1 for h_id in self.label_to_H if self.label_to_H[h_id] in self.H_f))
+        self.c2 = self.model.addConstr(sum([x for _, x in self.h.items()]), GRB.LESS_EQUAL, self.n_H)  # note that the single constraint
+        self.c3 = self.model.addConstrs((self.y.sum(r_id, "*")==1 for r_id in self.label_to_r.keys()))
 
         self.c4 = self.model.addConstrs((sum([self.m[self.label_to_r[r_id]] * self.y[r_id, p_id]
                                               for r_id in self.label_to_r.keys() for p_id in
                                               self.path_a_t[arc_t_id][r_id]])
-                                         <= self.k_t * self.t[arc_t_id]
+                                         - self.k_t * self.t[arc_t_id] <= 0
                                          for arc_t_id in self.label_to_at))
 
         self.c5 = self.model.addConstrs((sum([self.y[p_id] for p_id in self.path_i[h_id][r_id]]) <= self.h[h_id]
@@ -126,7 +126,9 @@ class SNDHLP:
 
         self.model.setObjective(obj, GRB.MINIMIZE)
         self.model.optimize()
-        print(self.model.getVars())
+        if self.model.status == GRB.OPTIMAL:
+            print(self.model.getVars())
+            print(self.model.getAttr('Pi'))
 
     def getPathByHub(self, hid):
         res = {}
