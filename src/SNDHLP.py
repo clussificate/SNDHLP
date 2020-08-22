@@ -3,7 +3,7 @@
 @Created at 2020/8/21 13:06
 @Author: Kurt
 @file:SNDHLP.py
-@Desc:
+@Desc: A branch-and-price-and-cut algorithm for service network design and hub location problem.
 """
 import numpy as np
 import gurobipy as gp
@@ -52,12 +52,14 @@ class SNDHLP:
         self.c_t = info["rail_fee"]
         self.c_s = info["road_fee"]
 
-        self.m = {key: val["demand"] for key, val in self.R.items()}
+        self.m = {key: val["demand"] for key, val in self.R.items()}  # {request: demand}
 
         # initial RLPM
         self.model = gp.Model("RLPM")
 
-        # label for paths (r_id, p_id): the p_th path of t_th request
+        # label for paths
+        # path ---->  {r_id:[0,1...]}: the p_th path of t_th request
+        # path_to_label ----> {"0,1,3":(0, 1)}
         self.path = {}
         self.path_to_label = {}
         self.label_to_path = {}
@@ -75,9 +77,11 @@ class SNDHLP:
 
         # paths that contain arc: {arc_id:{r_id:[p_id, p_id], r_id:[...]...}, arc_id:{...}....}
 
-        self.path_a_t = {arc_t_id: self.getPathByArc(self.path, arc_t_id, type= "t") for arc_t_id in self.label_to_at.keys()}  # rail arc
-        self.path_a_s = {arc_s_id: self.getPathByArc(self.path, arc_s_id, type= "s") for arc_s_id in self.label_to_as.keys()}  # road arc
-        self.path_arc = (lambda x, y: {**x, **y})(self.path_a_t, self.path_a_s)  # merge path information
+        self.path_a_t = {arc_t_id: self.getPathByArc(self.path, arc_t_id, arc_type="t") for arc_t_id in
+                         self.label_to_at.keys()}  # rail arc
+        self.path_a_s = {arc_s_id: self.getPathByArc(self.path, arc_s_id, arc_type="s") for arc_s_id in
+                         self.label_to_as.keys()}  # road arc
+        # self.path_arc = (lambda x, y: {**x, **y})(self.path_a_t, self.path_a_s)  # merge path information
 
         # num_path = [(od, x) for od, paths in self.path.items() for x in range(paths)]  # ind for path variables
         self.y = self.model.addvars(list(self.label_to_path.keys()), lb=0.0, ub=1.0, vtype=GRB.CONTINUOUS, name="y")
@@ -90,12 +94,28 @@ class SNDHLP:
         self.c2 = self.model.addConstr(sum([x for _, x in self.h.items()]), GRB.LESS_EQUAL, self.n_H)
         self.c3 = self.model.addConstrs((self.y.sum(self.r_to_label[r], "*") == 1 for r in self.R.keys()))
 
-        self.c4 = self.model.addConstrs((sum([self.m[r_id]*self.y[p_id]
-                                              for r_id in self.label_to_r.keys() for p_id in self.path_a_t[arc_t_id][r_id]])
-                                         <= self.k_t*self.t[arc_t_id]
+        self.c4 = self.model.addConstrs((sum([self.m[r_id] * self.y[p_id]
+                                              for r_id in self.label_to_r.keys() for p_id in
+                                              self.path_a_t[arc_t_id][r_id]])
+                                         <= self.k_t * self.t[arc_t_id]
                                          for arc_t_id in self.label_to_at))
 
-        self.c5 = self.model.addConstrs((sum([self.y[p_id] for p_id in self.path_i[h_id][r_id]]) <= self.h[h_id] for h_id in self.label_to_H for r_id in self.label_to_r))
+        self.c5 = self.model.addConstrs((sum([self.y[p_id] for p_id in self.path_i[h_id][r_id]]) <= self.h[h_id]
+                                         for h_id in self.label_to_H for r_id in self.label_to_r))
+
+        obj = gp.LinExpr()
+        for arc_t_id, arc_t in self.label_to_at.items():
+            obj += self.c_t * self.A_t[arc_t] * self.t[arc_t_id]
+
+        # path_a_s ={arc_id:{r_id:[p_id]}}
+        for arc_s_id, r_ids in self.path_a_s.items():
+            arc_s = self.label_to_as[arc_s_id]
+            l_a = self.A_s[arc_s]
+            for r_id, p_id_list in r_ids.itmes():
+                r = self.label_to_r[r_id]
+                m_r = self.m[r]
+                for p_id in p_id_list:
+                    obj += self.c_s * l_a * m_r * self.y[p_id]
 
     def getPathByHub(self, path, hid):
         res = {hid: {}}
@@ -110,11 +130,11 @@ class SNDHLP:
 
         return res
 
-    def getPathByArc(self, path, a_id, type=None):
+    def getPathByArc(self, path, a_id, arc_type=None):
         res = {a_id: {}}
-        if type== "t":
+        if arc_type == "t":
             arc_map = self.label_to_at
-        elif type == "s":
+        elif arc_type == "s":
             arc_map = self.label_to_as
         else:
             raise Exception()
@@ -125,7 +145,7 @@ class SNDHLP:
             for p_id in p_ids:
                 path = self.label_to_path[p_id]
                 for ind, node in enumerate(path[:-1]):
-                    if path[ind] == start and path[ind+1] ==end:
+                    if path[ind] == start and path[ind + 1] == end:
                         sel_pid.append(p_id)
             res[a_id][r_id] = sel_pid
         return res
