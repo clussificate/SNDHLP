@@ -5,14 +5,13 @@
 @file:utils.py
 @Desc:
 """
-import hashlib
-
 import numpy as np
 import math
 import random
 from pprint import pprint
 import networkx as nx
 import matplotlib.pyplot as plt
+import pickle
 
 random.seed(1994)
 
@@ -53,12 +52,13 @@ def viz(info: dict):
     for od in info["requests"].keys():
         o, d = od
         color = random_color()
-        print(color)
+        # print(color)
         G.nodes[o]['color'] = color
         G.nodes[d]['color'] = color
 
     node_color_list = [node[1]["color"] for node in G.nodes(data=True)]
 
+    # update location of nodes
     pos.update(info["location"])
 
     nx.draw(G, pos=pos, with_labels=True, node_size=200, node_color=node_color_list,
@@ -93,13 +93,16 @@ def gen_network(num_hub, num_fixed_hub):
 
     for ind, od in enumerate(zip(origins, dests)):
         D = dist(od[0], od[1])
-        info["requests"][("o" + str(ind), "d" + str(ind))] = {"starts": {}, "ends": {}}
+        info["requests"][("o" + str(ind), "d" + str(ind))] = {"starts": {}, "ends": {}, "demand": {}}
+
+        info["requests"][("o" + str(ind), "d" + str(ind))]["demand"] = np.random.randint(1, 11)
+
         info["A_s"][("o" + str(ind), "d" + str(ind))] = D
         loc_index["o" + str(ind)] = od[0]
         loc_index["d" + str(ind)] = od[1]
 
     # update allowed start points and end points for each request.
-    for od, content in info["requests"].items():
+    for od in info["requests"].keys():
         o, d = od
         dist_o = []
         dist_d = []
@@ -119,9 +122,13 @@ def gen_network(num_hub, num_fixed_hub):
         # update road arcs
         for hub in sort_choice_o:
             info["A_s"][(o, hub[0])] = hub[1]
+
         for hub in sort_choice_d:
-            info["A_s"][(hub[0]), d] = hub[1]
+            info["A_s"][(hub[0], d)] = hub[1]
     info['location'] = loc_index
+    info['capacity'] = 3
+    info['road_fee'] = 30
+    info['rail_fee'] = 15
 
     return info
 
@@ -130,3 +137,6 @@ if __name__ == "__main__":
     Info = gen_network(10, 5)
     pprint(Info)
     viz(Info)
+    with open("info", "wb") as f:
+        pickle.dump(Info, f)
+

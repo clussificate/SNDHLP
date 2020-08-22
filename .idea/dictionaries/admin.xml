@@ -2,6 +2,7 @@
   <dictionary name="admin">
     <words>
       <w>dest</w>
+      <w>dests</w>
     </words>
   </dictionary>
 </component>
