@@ -4,6 +4,7 @@
 @Author: Kurt
 @file:network.py
 @Desc:
+random road-rail transportation network generator.
 """
 import numpy as np
 import math
@@ -129,6 +130,7 @@ def gen_network(num_hub, num_fixed_hub):
     info['capacity'] = 3
     info['road_fee'] = 30
     info['rail_fee'] = 15
+    info['max_hop'] = 3
 
     return info
 
