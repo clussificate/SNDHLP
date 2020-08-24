@@ -117,8 +117,8 @@ def gen_network(num_hub, num_fixed_hub):
         sort_choice_d = sorted(dist_d, key=lambda x: x[1])[0: choice_d]
 
         # update allowed starts and ends
-        info["requests"][od]["starts"] = sort_choice_o
-        info["requests"][od]["ends"] = sort_choice_d
+        info["requests"][od]["starts"] = [start[0] for start in sort_choice_o]
+        info["requests"][od]["ends"] = [end[0] for end in sort_choice_d]
 
         # update road arcs
         for hub in sort_choice_o:

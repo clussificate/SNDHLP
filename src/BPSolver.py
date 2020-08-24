@@ -217,7 +217,8 @@ class Node:
     def _price(self, *params):
         gammas, deltas, epsilons = params
         new_path = {}
-        info = {"c_s": self.info["road_fee"], "m_r": {}, "starts": {}, "ends": {}, "max_hop": self.info['max_hop'],
+        info = {"c_s": self.info["road_fee"], "m_r": {}, "starts": {}, "ends": {},
+                "max_hop": self.info['max_hop'], "hubs": self.info['hubs'],
                 "gamma_r": {}, "delta_at": {}, "l_as": {}, "epsilon_h_r": {}}
 
         for r, content in self.R.items():
