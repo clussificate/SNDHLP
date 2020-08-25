@@ -61,7 +61,7 @@ class Node:
         self.path = path
         self.bpsolver = bpsolver
 
-        # get all edges. A_t: bidirectional edge, A_s: normal monodirectional edge
+        # # get all edges. A_t: bidirectional edge, A_s: normal monodirectional edge
         # self.edges = list((lambda x, y: {**x, **y})(self.info["A_t"], self.info["A_s"]))
         # self.edges.extend([(arc[1], arc[0]) for arc in self.info["A_t"]])
 
@@ -161,8 +161,9 @@ class Node:
             dual_c4 = master_prb.getAttr("Pi", constrs_tuple.c4)
             dual_c5 = master_prb.getAttr("Pi", constrs_tuple.c5)
 
-            new_path = self._price(dual_c3, dual_c4, dual_c5)  # {request1: [path1, path2...]},  not id
-            self.update_paras(new_path)
+            no_negative_reduced_cost = self._price(dual_c3, dual_c4, dual_c5)
+            if no_negative_reduced_cost:    # no negative reduced cost, then branching if solutions are not integral.
+                pass
 
     def build_master_prb(self):
         # initial RLPM
@@ -241,9 +242,13 @@ class Node:
         pprint(info)
 
         # solve subproblem to find feasible path for each request.
+        no_negative_reduced_cost = True
         for r, _ in self.r_to_label.items():
-            new_path[r] = SpSovler(r, info)
-        return new_path
+            feasible_path = SpSovler(r, info).feasible_path
+            if not feasible_path.empty():
+                self.update_paras(r, feasible_path)
+                no_negative_reduced_cost = False
+        return no_negative_reduced_cost
 
     def getPathByHub(self, hid):
         res = {}
@@ -279,13 +284,47 @@ class Node:
             res[r_id] = sel_pid
         return res
 
-    def update_paras(self, new_path):
+    def update_paras(self, r, path_priority_queue):
         """
         update:
         · self.label_to_path,  self.path_to_label, self.path_i, self.path_a_s, self.path_a_t
         · self.path , self.path_encoding
         """
-        pass
+        print("update parameter for request:{}".format(r))
+        r_id = self.r_to_label[r]
+        cost_, path_obj = path_priority_queue.get()
+        path_ = path_obj.path
+        print("feasible path: {}".format(path_))
+
+        path_id = len(self.path[r])
+        self.path_to_label[str(path_)] = (r_id, path_id)
+        self.label_to_path[r_id, path_id] = path_
+
+        self.path[r].append(path_)
+        self.path_encoding[r_id].append(path_id)
+
+        # update path_i
+        path_hubs = path_[1:-1]
+        for hub in path_hubs:  # remove origin and destination node
+            h_id = self.H_to_label[hub]
+            self.path_i[h_id][r_id].append(path_id)
+
+        # update path_a_s
+        start_ = (path_[0], path_[1])
+        start_id = self.as_to_label[start_]
+        self.path_a_s[start_id][r_id].append(path_id)
+
+        end_ = (path_[-2], path_[-1])
+        end_id = self.as_to_label[end_]
+        self.path_a_s[end_id][r_id].append(path_id)
+
+        # update path_a_t
+        for ind, hub in enumerate(path_hubs[:-1]):
+            try:
+                arc_t_id = self.at_to_label[hub, path_hubs[ind + 1]]
+            except KeyError:
+                arc_t_id = self.at_to_label[path_hubs[ind + 1], hub]
+            self.path_a_t[arc_t_id][r_id].append(path_id)
 
 
 if __name__ == "__main__":

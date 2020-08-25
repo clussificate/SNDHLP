@@ -51,7 +51,7 @@ def parse_node(node):
 
 
 def parse_path(merged_label, deltas, gamma):
-    print("-------------------Parse path information----------------------")
+    # print("-------------------Parse path information----------------------")
     paths = defaultdict(list)
     feasible_path = PriorityQueue()
     for hop, pairs in merged_label.items():
@@ -110,7 +110,7 @@ class SpSovler:
         pass
 
     def bidirectional_search(self, max_hop):
-        print("---------------Generate bidirectional search network----------------")
+        # print("---------------Generate bidirectional search network----------------")
         origin = self.request[0]
         destination = self.request[1]
         starts = self.starts_r
@@ -131,7 +131,7 @@ class SpSovler:
         self.feasible_path = feasible_path
 
     def gen_network(self, source, first_layers, max_hop, direction):
-        print("---------------Direction: {}----------------".format(direction))
+        # print("---------------Direction: {}----------------".format(direction))
         hubs = self.hubs[:]
         layers = [[source], first_layers]
         number_of_layers = 0
@@ -156,7 +156,7 @@ class SpSovler:
         return network
 
     def gen_label(self, network):
-        print("---------------Generate labels----------------")
+        # print("---------------Generate labels----------------")
         labels = []
         initial_root = network[0][0]
         initial_label = Label(initial_root.NAME, None, Consumption(0, 0))
@@ -197,7 +197,7 @@ class SpSovler:
         return cost
 
     def merge_label(self, forward_labels, backward_labels, max_hop):
-        print("----------------------------Merge labels----------------------------")
+        # print("----------------------------Merge labels----------------------------")
         split_max_hop = max_hop - 1  # forward_network and backward network generate one hop.
         max_forward_hop = math.floor(max_hop / 2)
         max_backward_hop = split_max_hop - max_forward_hop
@@ -225,7 +225,7 @@ class SpSovler:
         # pprint(dict(merged_label))
         # print("\n")
         # pprint(dict(merged_label)[3])
-        # print("\n")
+        # print("\n")3
         # pprint(dict(merged_label)[5])
 
         paths = parse_path(merged_label, deltas=self.deltas, gamma=self.gamma_r)
