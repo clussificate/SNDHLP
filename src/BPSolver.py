@@ -18,18 +18,18 @@ from SubprbSovler import SpSovler
 
 
 class BPSolver:
-    BEST_VAL = float("inf")
-    _SOL = None
+    BEST_INTEGER_VAL = float("inf")   # default positive infinity
+    INC_SOL = None
 
     def __init__(self, info):
         self.info = deepcopy(info)
         self.pending_nodes = LifoQueue()
-        self.pending_nodes_best_bound = PriorityQueue()
+        self.pending_nodes_best_bound = PriorityQueue()  # best first search
         self.R = self.info['requests']
 
     def add_node(self, lpbound, node):
         self.pending_nodes.put(node)
-        self.pending_nodes_best_bound.put((lpbound, node))
+        self.pending_nodes_best_bound.put((lpbound, node)) # best first search
 
     def solve(self):
         # create root node
@@ -41,17 +41,21 @@ class BPSolver:
 
         root = Node(self.info, initial_path, self)
         self.pending_nodes.put(root)
-        self.pending_nodes_best_bound.put((1000000, root))
+        self.pending_nodes_best_bound.put((1000, root))
 
         iter_times = 0
         while not (self.pending_nodes.empty()):
             processing_node = self.pending_nodes.get()
-
+            print("Current processing node: {}".format(iter_times))
             processing_node.process()
             iter_times += 1
 
 
 class Node:
+    FRACTIONAL_TEST_HUB = 1
+    FRACTIONAL_TEST_TRAIN = 2
+    FRACTIONAL_TEST_PATH = 3
+
     def __init__(self, info, path, bpsolver):
         self.info = deepcopy(info)  # defensive copy
         self.k_t = self.info['capacity']
@@ -162,8 +166,39 @@ class Node:
             dual_c5 = master_prb.getAttr("Pi", constrs_tuple.c5)
 
             no_negative_reduced_cost = self._price(dual_c3, dual_c4, dual_c5)
-            if no_negative_reduced_cost:    # no negative reduced cost, then branching if solutions are not integral.
-                pass
+            # print("path:\n{}".format(self.path))
+            # print("path_encoding:\n{}".format(self.path_encoding))
+            # print("path_to_label:\n{}".format(self.path_to_label))
+            # print("label_to_path:\n{}".format(self.label_to_path))
+            # print("path_i:\n{}".format(self.path_i))
+            # print("path_a_t:\n{}".format(self.path_a_t))
+            # print("path_a_s:\n{}".format(self.path_a_s))
+
+            if no_negative_reduced_cost:  # no negative reduced cost, then branching if solutions are not integral.
+                if master_prb.status == GRB.OPTIMAL:
+                    self.master_prb = master_prb
+                    print("master val: {}".format(master_prb.getObjective().getValue()))
+                else:
+                    print("master infeasible.")
+        self.solved = True
+
+        # if current lp solution value > current best integer solution value, no need to branch.
+        lp_val = self.master_prb.getObjective().getValue()
+        if lp_val > BPSolver.BEST_INTEGER_VAL:
+            return
+
+        # integrality  check.
+        int_res = self._int_check()
+
+        if int_res is not None:
+            node1, node2 = self._branch(int_res)
+            self.bpsolver.add_node(lp_val, node1)
+            self.bpsolver.add_node(lp_val, node2)
+        else:
+            # all integer, update the upper bound
+            if lp_val < BPSolver.BEST_INTEGER_VAL:
+                BPSolver.BEST_INTEGER_VAL = lp_val
+
 
     def build_master_prb(self):
         # initial RLPM
@@ -206,6 +241,7 @@ class Node:
                     obj += self.c_s * l_a * m_r * y[r_id, p_id]
 
         model.setObjective(obj, GRB.MINIMIZE)
+        model.update()
 
         Var = namedtuple('Variables', ['y', 'h', 't'])
         var = Var(y, h, t)
@@ -326,6 +362,44 @@ class Node:
                 arc_t_id = self.at_to_label[path_hubs[ind + 1], hub]
             self.path_a_t[arc_t_id][r_id].append(path_id)
 
+    def _int_check(self):
+        res = self._int_check_hub()
+        if res:
+            return Node.FRACTIONAL_TEST_HUB
+
+        res = self._int_check_train()
+        if res:
+            return Node.FRACTIONAL_TEST_TRAIN
+
+        res = self._int_check_path()
+        if res:
+            return Node.FRACTIONAL_TEST_PATH
+
+        return
+
+    def _int_check_hub(self):
+        """
+        integer check on hub variables
+        :return: fractional hub variables
+        """
+        pass
+
+    def _int_check_train(self):
+        """
+        integer check on train variables
+        :return: fractional train variables
+        """
+        pass
+
+    def _int_check_path(self):
+        """
+        integer check on path variables
+        :return: fractional path variables
+        """
+        pass
+
+    def _branch(self):
+        pass
 
 if __name__ == "__main__":
     with open("info", "rb") as f:
