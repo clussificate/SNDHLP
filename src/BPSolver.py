@@ -62,8 +62,8 @@ class Node:
         self.bpsolver = bpsolver
 
         # get all edges. A_t: bidirectional edge, A_s: normal monodirectional edge
-        self.edges = list((lambda x, y: {**x, **y})(self.info["A_t"], self.info["A_s"]))
-        self.edges.extend([(arc[1], arc[0]) for arc in self.info["A_t"]])
+        # self.edges = list((lambda x, y: {**x, **y})(self.info["A_t"], self.info["A_s"]))
+        # self.edges.extend([(arc[1], arc[0]) for arc in self.info["A_t"]])
 
         for hub in self.H:
             ind = len(self.H_to_label)
@@ -242,7 +242,7 @@ class Node:
 
         # solve subproblem to find feasible path for each request.
         for r, _ in self.r_to_label.items():
-            new_path[r] = SpSovler(r, info, self.edges)
+            new_path[r] = SpSovler(r, info)
         return new_path
 
     def getPathByHub(self, hid):

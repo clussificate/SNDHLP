@@ -130,7 +130,7 @@ def gen_network(num_hub, num_fixed_hub):
     info['capacity'] = 3
     info['road_fee'] = 30
     info['rail_fee'] = 15
-    info['max_hop'] = 3
+    info['max_hop'] = 5  # hop means the transmission between nodes, including origin to hub, and hub to destination.
 
     return info
 
@@ -141,4 +141,3 @@ if __name__ == "__main__":
     viz(Info)
     with open("info", "wb") as f:
         pickle.dump(Info, f)
-
