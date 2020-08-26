@@ -53,7 +53,7 @@ def parse_node(node):
 def parse_path(merged_label, deltas, gamma):
     # print("-------------------Parse path information----------------------")
     paths = defaultdict(list)
-    feasible_path = PriorityQueue()
+    feasible_path = []
     for hop, pairs in merged_label.items():
         for pair in pairs:
             forward_label, backward_label = pair
@@ -76,11 +76,14 @@ def parse_path(merged_label, deltas, gamma):
             path = Path(forward_path_reverse[::-1] + backward_path, cost)
             paths[hop].append(path)
             if cost < 0:
-                feasible_path.put([cost, path])
+                # print(cost)
+                # print(path.path)
+                feasible_path.append([cost, path])
 
     # for hop, paths in paths.items():
     #     for path in paths:
     #         print("Current hop: {}, current path: {}, current cost: {}".format(hop, path.path, path.cost))
+    feasible_path.sort(key= lambda x:x[0],reverse=True)
     return paths, feasible_path
 
 
@@ -234,6 +237,6 @@ class SpSovler:
 
 if __name__ == "__main__":
     info = DATA.sp_info
-    # pprint(info)
+    pprint(info)
     r = ('o0', 'd0')
     sp = SpSovler(r, info)

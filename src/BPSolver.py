@@ -18,7 +18,7 @@ from SubprbSovler import SpSovler
 
 
 class BPSolver:
-    BEST_INTEGER_VAL = float("inf")   # default positive infinity
+    BEST_INTEGER_VAL = float("inf")  # default positive infinity
     INC_SOL = None
 
     def __init__(self, info):
@@ -29,17 +29,18 @@ class BPSolver:
 
     def add_node(self, lpbound, node):
         self.pending_nodes.put(node)
-        self.pending_nodes_best_bound.put((lpbound, node)) # best first search
+        self.pending_nodes_best_bound.put((lpbound, node))  # best first search
 
     def solve(self):
         # create root node
+        initial_constraints = []
         initial_path = {}
         for r in self.R:
             initial_path[r] = []
             path_ = list(r)
             initial_path[r].append(path_)
 
-        root = Node(self.info, initial_path, self)
+        root = Node(self.info, initial_constraints, initial_path, self)
         self.pending_nodes.put(root)
         self.pending_nodes_best_bound.put((1000, root))
 
@@ -56,14 +57,15 @@ class Node:
     FRACTIONAL_TEST_TRAIN = 2
     FRACTIONAL_TEST_PATH = 3
 
-    def __init__(self, info, path, bpsolver):
+    def __init__(self, info, branch_constraints, path, bpsolver):
         self.info = deepcopy(info)  # defensive copy
+        self.path = path
+        self.bpsolver = bpsolver
+        self.branch_constraints = branch_constraints
         self.k_t = self.info['capacity']
         self.H = self.info['hubs']
         self.H_to_label = {}
         self.label_to_H = {}
-        self.path = path
-        self.bpsolver = bpsolver
 
         # # get all edges. A_t: bidirectional edge, A_s: normal monodirectional edge
         # self.edges = list((lambda x, y: {**x, **y})(self.info["A_t"], self.info["A_s"]))
@@ -130,13 +132,10 @@ class Node:
 
         self.path_a_s = {arc_s_id: self.getPathByArc(arc_s_id, arc_type="s") for arc_s_id in
                          self.label_to_as}  # road arc
-        # # alternative methods.
-        # self.path_a_t = {self.label_to_at[arc_t_id]: self.getPathByArc(self.path, arc_t_id, arc_type="t") for
-        # arc_t_id in self.label_to_at.keys()}  # rail arc self.path_a_s = {self.label_to_as[arc_s_id]:
-        # self.getPathByArc(self.path, arc_s_id, arc_type="s") for arc_s_id in self.label_to_as.keys()}  # road arc
-        # self.path_arc = (lambda x, y: {**x, **y})(self.path_a_t, self.path_a_s)  # merge path information
 
         self.master_prb = None
+        self.var_tuple = None
+        self.constraint_tuple=None
         self.price_prb = None
         self.solved = False
 
@@ -150,12 +149,15 @@ class Node:
         # self.price_prb = self.build_price_prb()
 
         # column generation loop
-        max_iter_times = 1
+        max_iter_times = 2
         iter_time = 0
+        int_res = None
         while iter_time < max_iter_times:
             iter_time += 1
+            print("Current iter: {}".format(iter_time))
             master_prb, vars_tuple, constrs_tuple = self.build_master_prb()
             master_prb.setParam('outputflag', True)
+            master_prb.setParam(GRB.Param.Presolve, 0)
             master_prb.optimize()
 
             # get dual variable value
@@ -164,6 +166,21 @@ class Node:
             dual_c3 = master_prb.getAttr("Pi", constrs_tuple.c3)
             dual_c4 = master_prb.getAttr("Pi", constrs_tuple.c4)
             dual_c5 = master_prb.getAttr("Pi", constrs_tuple.c5)
+            # print("vars: \n{}".format(master_prb.getVars()))
+            print("m_r:\n{}".format(self.m))
+            print("c_s: {}:".format(self.c_s))
+            print("l_a:\n{}".format(self.A_s))
+            print("label r:\n {}".format(self.label_to_r))
+            print("label arc_t:\n {}".format(self.label_to_at))
+            print(" dual of c1:\n {}".format(dual_c1))
+            print(" dual of c2:\n {}".format(dual_c2))
+            print(" gammas :\n {}".format(dual_c3))
+            print(" deltas :\n {}".format(dual_c4))
+            print(" epsilons:\n {}".format(dual_c5))
+
+            if master_prb.status == GRB.OPTIMAL:
+                for var in master_prb.getVars():
+                    print("varName: {}, value: {}, reduced cost:{}".format(var.VarName, var.x, var.RC))
 
             no_negative_reduced_cost = self._price(dual_c3, dual_c4, dual_c5)
             # print("path:\n{}".format(self.path))
@@ -177,6 +194,8 @@ class Node:
             if no_negative_reduced_cost:  # no negative reduced cost, then branching if solutions are not integral.
                 if master_prb.status == GRB.OPTIMAL:
                     self.master_prb = master_prb
+                    self.constraint_tuple = constrs_tuple
+                    self.var_tuple = vars_tuple
                     print("master val: {}".format(master_prb.getObjective().getValue()))
                 else:
                     print("master infeasible.")
@@ -199,33 +218,41 @@ class Node:
             if lp_val < BPSolver.BEST_INTEGER_VAL:
                 BPSolver.BEST_INTEGER_VAL = lp_val
 
-
     def build_master_prb(self):
         # initial RLPM
         model = gp.Model("RLPM")
-
+        print("label path {}".format(self.label_to_path))
+        print("label hub {}".format(self.label_to_H))
         # num_path = [(od, x) for od, paths in self.path.items() for x in range(paths)]  # ind for path variables
         y = model.addVars(list(self.label_to_path), lb=0.0, ub=1.0, vtype=GRB.CONTINUOUS, name="y")
         h = model.addVars(len(self.H), lb=0.0, ub=1, vtype=GRB.CONTINUOUS, name='h')
         t = model.addVars(len(self.A_t), lb=0.0, ub=GRB.INFINITY, vtype=GRB.CONTINUOUS, name="t")
-        model.update()
+
 
         # add constraints
         c1 = model.addConstrs(
-            (h[h_id] == 1 for h_id in self.label_to_H if self.label_to_H[h_id] in self.H_f))
-        c2 = model.addConstr(sum([x for _, x in h.items()]), GRB.LESS_EQUAL,
-                             self.n_H)  # note that the single constraint
-        c3 = model.addConstrs((y.sum(r_id, "*") == 1 for r_id in self.label_to_r))
+            (h[h_id] - 1 == 0.0 for h_id in self.label_to_H if self.label_to_H[h_id] in self.H_f))
 
-        c4 = model.addConstrs((sum([self.m[self.label_to_r[r_id]] * y[r_id, p_id]
+        c2 = model.addConstr(sum([x for _, x in h.items()])-self.n_H, GRB.LESS_EQUAL,
+                             0.0)  # note that the single constraint
+
+        c3 = model.addConstrs((y.sum(r_id, "*") == 1.0 for r_id in self.label_to_r))
+
+        c4 = model.addConstrs((gp.quicksum([self.m[self.label_to_r[r_id]] * y[r_id, p_id]
                                     for r_id in self.label_to_r for p_id in
                                     self.path_a_t[arc_t_id][r_id]])
                                - self.k_t * t[arc_t_id] <= 0
                                for arc_t_id in self.label_to_at))
 
-        c5 = model.addConstrs((sum([y[p_id] for p_id in self.path_i[h_id][r_id]]) <= h[h_id]
+        # for h_id in self.label_to_H:
+        #     print("-----------------------")
+        #     for r_id in self.label_to_r:
+        #         print(sum([y[r_id, p_id] for p_id in self.path_i[h_id][r_id]]) - h[h_id])
+
+        c5 = model.addConstrs((sum([y[r_id, p_id] for p_id in self.path_i[h_id][r_id]]) - h[h_id] <= 0.0
                                for h_id in self.label_to_H for r_id in self.label_to_r))  # key: (h_id, r_id)
 
+        # add objective function
         obj = gp.LinExpr()
         for arc_t_id, arc_t in self.label_to_at.items():
             obj += self.c_t * self.A_t[arc_t] * t[arc_t_id]
@@ -274,14 +301,11 @@ class Node:
             for r, r_id in self.r_to_label.items():
                 info["epsilon_h_r"][hub, r] = epsilons[h_id, r_id]
 
-        print("Current info for price problem:")
-        pprint(info)
-
         # solve subproblem to find feasible path for each request.
         no_negative_reduced_cost = True
         for r, _ in self.r_to_label.items():
             feasible_path = SpSovler(r, info).feasible_path
-            if not feasible_path.empty():
+            if feasible_path:
                 self.update_paras(r, feasible_path)
                 no_negative_reduced_cost = False
         return no_negative_reduced_cost
@@ -328,9 +352,9 @@ class Node:
         """
         print("update parameter for request:{}".format(r))
         r_id = self.r_to_label[r]
-        cost_, path_obj = path_priority_queue.get()
+        cost_, path_obj = path_priority_queue.pop()
         path_ = path_obj.path
-        print("feasible path: {}".format(path_))
+        print("feasible path: {}, cost: {}".format(path_, cost_))
 
         path_id = len(self.path[r])
         self.path_to_label[str(path_)] = (r_id, path_id)
@@ -367,7 +391,7 @@ class Node:
         if res:
             return Node.FRACTIONAL_TEST_HUB
 
-        res = self._int_check_train()
+        self._int_check_train()
         if res:
             return Node.FRACTIONAL_TEST_TRAIN
 
@@ -379,10 +403,24 @@ class Node:
 
     def _int_check_hub(self):
         """
-        integer check on hub variables
+        Calculate the number of containers transshipped at each hub in the current LP solution.
+        For the hub i with the largest such number and fractional value, we create two branches
         :return: fractional hub variables
         """
-        pass
+        hub_sol = []
+        for h_id, hub in self.label_to_H.items():
+            if self.constraint_tuple.h[h_id].x < 0.001 or self.constraint_tuple.h[h_id].x > 0.999:
+                continue
+            num = 0
+            for r_id, r in self.label_to_r.items():
+                for path_ in self.path[r]:
+                    path_id = self.path_to_label[str(path_)]
+                    if hub in path_:
+                        num += self.constraint_tuple.y[path_id] * self.m[r]
+
+            hub_sol.append((num, hub))
+
+        return hub_sol
 
     def _int_check_train(self):
         """
@@ -400,6 +438,7 @@ class Node:
 
     def _branch(self):
         pass
+
 
 if __name__ == "__main__":
     with open("info", "rb") as f:

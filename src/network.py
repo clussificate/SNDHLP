@@ -138,6 +138,6 @@ def gen_network(num_hub, num_fixed_hub):
 if __name__ == "__main__":
     Info = gen_network(10, 5)
     pprint(Info)
-    viz(Info)
+    # viz(Info)
     with open("info", "wb") as f:
         pickle.dump(Info, f)
