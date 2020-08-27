@@ -6,7 +6,7 @@
 @Desc:
 A branch-and-price-and-cut algorithm for service network design and hub location problem.
 """
-import numpy as np
+import math
 from pprint import pprint
 import gurobipy as gp
 from gurobipy import GRB
@@ -33,7 +33,7 @@ class BPSolver:
 
     def solve(self):
         # create root node
-        initial_constraints = []
+        initial_constraints = {"arc": [], "path": []}
         initial_path = {}
         for r in self.R:
             initial_path[r] = []
@@ -59,7 +59,7 @@ class Node:
 
     def __init__(self, info, branch_constraints, path, bpsolver):
         self.info = deepcopy(info)  # defensive copy
-        self.path = path
+        self.path = deepcopy(path)
         self.bpsolver = bpsolver
         self.branch_constraints = branch_constraints
         self.k_t = self.info['capacity']
@@ -135,7 +135,7 @@ class Node:
 
         self.master_prb = None
         self.var_tuple = None
-        self.constraint_tuple=None
+        self.constraint_tuple = None
         self.price_prb = None
         self.solved = False
 
@@ -149,7 +149,7 @@ class Node:
         # self.price_prb = self.build_price_prb()
 
         # column generation loop
-        max_iter_times = 10
+        max_iter_times = 50
         iter_time = 0
         int_res = None
         while iter_time < max_iter_times:
@@ -167,17 +167,17 @@ class Node:
             dual_c3 = master_prb.getAttr("Pi", constrs_tuple.c3)
             dual_c4 = master_prb.getAttr("Pi", constrs_tuple.c4)
             dual_c5 = master_prb.getAttr("Pi", constrs_tuple.c5)
-            print("vars: \n{}".format(master_prb.getVars()))
-            print("m_r:\n{}".format(self.m))
-            print("c_s: {}:".format(self.c_s))
-            print("l_a:\n{}".format(self.A_s))
-            print("label r:\n {}".format(self.label_to_r))
-            print("label arc_t:\n {}".format(self.label_to_at))
-            print(" dual of c1:\n {}".format(dual_c1))
-            print(" dual of c2:\n {}".format(dual_c2))
-            print(" gammas :\n {}".format(dual_c3))
-            print(" deltas :\n {}".format(dual_c4))
-            print(" epsilons:\n {}".format(dual_c5))
+            # print("vars: \n{}".format(master_prb.getVars()))
+            # print("m_r:\n{}".format(self.m))
+            # print("c_s: {}:".format(self.c_s))
+            # print("l_a:\n{}".format(self.A_s))
+            # print("label r:\n {}".format(self.label_to_r))
+            # print("label arc_t:\n {}".format(self.label_to_at))
+            # print(" dual of c1:\n {}".format(dual_c1))
+            # print(" dual of c2:\n {}".format(dual_c2))
+            # print(" gammas :\n {}".format(dual_c3))
+            # print(" deltas :\n {}".format(dual_c4))
+            # print(" epsilons:\n {}".format(dual_c5))
 
             if master_prb.status == GRB.OPTIMAL:
                 for var in master_prb.getVars():
@@ -187,7 +187,7 @@ class Node:
             # print("path:\n{}".format(self.path))
             # print("path_encoding:\n{}".format(self.path_encoding))
             # print("path_to_label:\n{}".format(self.path_to_label))
-            print("label path {}".format(self.label_to_path))
+            # print("label path {}".format(self.label_to_path))
             # print("path_i:\n{}".format(self.path_i))
             # print("path_a_t:\n{}".format(self.path_a_t))
             # print("path_a_s:\n{}".format(self.path_a_s))
@@ -201,6 +201,7 @@ class Node:
                     print("master val: {}".format(master_prb.getObjective().getValue()))
                 else:
                     print("master infeasible.")
+                break
         self.solved = True
 
         # if current lp solution value > current best integer solution value, no need to branch.
@@ -228,19 +229,18 @@ class Node:
         h = model.addVars(len(self.H), lb=0.0, ub=GRB.INFINITY, vtype=GRB.CONTINUOUS, name='h')
         t = model.addVars(len(self.A_t), lb=0.0, ub=GRB.INFINITY, vtype=GRB.CONTINUOUS, name="t")
 
-
         # add constraints
         c1 = model.addConstrs(
             (h[h_id] - 1 == 0.0 for h_id in self.label_to_H if self.label_to_H[h_id] in self.H_f))
 
-        c2 = model.addConstr(sum([x for _, x in h.items()])-self.n_H, GRB.LESS_EQUAL,
+        c2 = model.addConstr(sum([x for _, x in h.items()]) - self.n_H, GRB.LESS_EQUAL,
                              0.0)  # note that the single constraint
 
         c3 = model.addConstrs((y.sum(r_id, "*") == 1.0 for r_id in self.label_to_r))
 
         c4 = model.addConstrs((gp.quicksum([self.m[self.label_to_r[r_id]] * y[r_id, p_id]
-                                    for r_id in self.label_to_r for p_id in
-                                    self.path_a_t[arc_t_id][r_id]])
+                                            for r_id in self.label_to_r for p_id in
+                                            self.path_a_t[arc_t_id][r_id]])
                                - self.k_t * t[arc_t_id] <= 0
                                for arc_t_id in self.label_to_at))
 
@@ -300,7 +300,7 @@ class Node:
             for r, r_id in self.r_to_label.items():
                 info["epsilon_h_r"][hub, r] = epsilons[h_id, r_id]
 
-        pprint(info)
+        # pprint(info)
         # solve subproblem to find feasible path for each request.
         no_negative_reduced_cost = True
         for r, _ in self.r_to_label.items():
@@ -389,17 +389,17 @@ class Node:
     def _int_check(self):
         res = self._int_check_hub()
         if res:
-            return Node.FRACTIONAL_TEST_HUB
+            return Node.FRACTIONAL_TEST_HUB, res
 
         self._int_check_train()
         if res:
-            return Node.FRACTIONAL_TEST_TRAIN
+            return Node.FRACTIONAL_TEST_TRAIN, res
 
-        res = self._int_check_path()
+        self._int_check_path()
         if res:
             return Node.FRACTIONAL_TEST_PATH
 
-        return
+        return None
 
     def _int_check_hub(self):
         """
@@ -409,25 +409,38 @@ class Node:
         """
         hub_sol = []
         for h_id, hub in self.label_to_H.items():
-            if self.constraint_tuple.h[h_id].x < 0.001 or self.constraint_tuple.h[h_id].x > 0.999:
+            if self.var_tuple.h[h_id].x < 0.001 or self.var_tuple.h[h_id].x > 0.999:
                 continue
             num = 0
             for r_id, r in self.label_to_r.items():
                 for path_ in self.path[r]:
                     path_id = self.path_to_label[str(path_)]
                     if hub in path_:
-                        num += self.constraint_tuple.y[path_id] * self.m[r]
+                        num += self.var_tuple.y[path_id].x * self.m[r]
 
             hub_sol.append((num, hub))
-
-        return hub_sol
+        hub_sol.sort(key=lambda x: x[0], reverse=True)
+        if hub_sol:
+            # if not empty, return the hub with largest number of containers
+            return hub_sol[0][1]
+        else:
+            return None
 
     def _int_check_train(self):
         """
-        integer check on train variables
+        If the upper bound of a train variable is set to zero,
+        the corresponding arc has to be removed from the network of the pricing problem.
+        In all other cases, the branch- ing decision does not affect the pricing problem.
         :return: fractional train variables
         """
-        pass
+        for arc_t_id, arc_t in self.label_to_at.items():
+            t_a = self.var_tuple.t[arc_t_id].x
+            if abs(t_a - round(t_a)) <= 0.001:
+                continue
+            else:
+                return arc_t, t_a
+
+        return None
 
     def _int_check_path(self):
         """
@@ -436,8 +449,98 @@ class Node:
         """
         pass
 
-    def _branch(self):
-        pass
+    def _branch(self, int_res):
+        if int_res[0] == Node.FRACTIONAL_TEST_HUB:
+            hub = int_res[1]
+            node_left, node_right = self._branch_on_hub(hub)
+            return node_left, node_right
+
+        if int_res[0] == Node.FRACTIONAL_TEST_TRAIN:
+            arc_t = int_res[1][0]
+            num = int_res[1][1]
+            node_left, node_right = self._branch_on_arc(arc_t, num)
+
+        if int_res[0] == Node.FRACTIONAL_TEST_PATH:
+            pass
+
+    def _branch_on_hub(self, hub):
+        # left node, add the hub as a fixed hub
+        Info_fix_to_one = deepcopy(self.info)
+        Info_fix_to_one["fixed_hubs"].append(hub)
+        node_left = Node(Info_fix_to_one, [], self.path, self.bpsolver)
+
+        # right node, remove the hub
+
+        Info_fix_to_zero = deepcopy(self.info)
+        Info_fix_to_zero["A_t"].clear()
+        Info_fix_to_zero["A_s"].clear()
+        # remove the hub in starts, ends, hubs, and fixed_hubs.
+        Info_fix_to_zero["fixed_hubs"].remove(hub)
+        Info_fix_to_zero["hubs"].remove(hub)
+        for r, content in Info_fix_to_zero["requests"].items():
+            if hub in content['starts']:
+                Info_fix_to_zero[r]["starts"].remove(hub)
+            if hub in content['ends']:
+                Info_fix_to_zero[r]["ends"].remove(hub)
+
+        for arc_t, dis in self.info["A_t"].items():
+            if hub in arc_t:
+                continue
+            Info_fix_to_zero["A_t"][arc_t] = dis
+
+        for arc_s, dis in self.info["A_s"].items():
+            if hub in arc_s:
+                continue
+            Info_fix_to_zero["A_s"][arc_s] = dis
+
+        # delete paths that contain the hub
+        del_path = deepcopy(self.path)
+        for r, paths in del_path.items():
+            for path in paths:
+                if hub in path:
+                    del_path[r].remove(path)
+
+        node_right = Node(Info_fix_to_zero, [], del_path, self.bpsolver)
+        return node_left, node_right
+
+    def _branch_on_arc(self, arc_t, num):
+        round_up = math.ceil(num)
+        round_down = math.floor(num)
+
+        # left node
+        if round_down == 0.0:
+            # the upper bound of the left branching node is zero, thus remove the arc.
+            info_left = deepcopy(self.info)
+            branch_constraints_left = deepcopy(self.branch_constraints)
+            info_left['A_t'].clear()
+            for arc_t1, dis in self.info["A_t"].items():
+                if arc_t == arc_t1:
+                    continue
+                info_left["A_t"][arc_t1] = dis
+
+            # remove paths that contain arc_t
+            del_path = deepcopy(self.path)
+            for r, paths in del_path.items():
+                for path in paths:
+                    for ind, node in enumerate(path[0: -1]):
+                        if arc_t == (node, path[ind+1]):
+                            del_path[r].remove(path)
+                        if (arc_t[1], arc_t[0]) == (node, path[ind+1]):
+                            del_path[r].remove(path)
+            node_left = Node(info_left, branch_constraints_left, del_path, self.bpsolver)
+        else:
+            info_left = deepcopy(self.info)
+            branch_constraints_left = deepcopy(self.branch_constraints)
+            branch_constraints_left['arc'].append([arc_t, "LESS_EQUAL", round_down])
+            node_left = Node(info_left, branch_constraints_left, self.path, self.bpsolver)
+
+        # right node
+        Info_right = deepcopy(self.info)
+        branch_constraints_right = deepcopy(self.branch_constraints)
+        branch_constraints_right['arc'].append([arc_t, "LARGER_EQUAL", round_up])
+        node_right = Node(Info_right, branch_constraints_right, self.path, self.bpsolver)
+
+        return node_left, node_right
 
 
 if __name__ == "__main__":

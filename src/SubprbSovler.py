@@ -86,7 +86,7 @@ def parse_path(merged_label, deltas, gamma, m, epsilons):
     # for hop, paths in paths.items():
     #     for path in paths:
     #         print("Current hop: {}, current path: {}, current cost: {}".format(hop, path.path, path.cost))
-    feasible_path.sort(key= lambda x:x[0],reverse=True)
+    feasible_path.sort(key=lambda x: x[0], reverse=True)
     return paths, feasible_path
 
 
@@ -247,7 +247,7 @@ if __name__ == "__main__":
     r = ('o4', 'd4')
     sp = SpSovler(r, info)
     for cost, path_ in sp.feasible_path:
-        print("cost: {}, feasible path {}, cost:{}".format(cost, path_.path, path_.cost))
+        print("feasible path {}, cost:{}".format(path_.path, path_.cost))
     print("----------------------------------------------------")
     for hop, paths_ in sp.path.items():
         for path in paths_:
