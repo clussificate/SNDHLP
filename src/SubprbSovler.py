@@ -50,7 +50,7 @@ def parse_node(node):
         return [x.NAME for x in node]
 
 
-def parse_path(merged_label, deltas, gamma):
+def parse_path(merged_label, deltas, gamma, m, epsilons):
     # print("-------------------Parse path information----------------------")
     paths = defaultdict(list)
     feasible_path = []
@@ -59,25 +59,28 @@ def parse_path(merged_label, deltas, gamma):
             forward_label, backward_label = pair
             cost = forward_label.z.cost + backward_label.z.cost - gamma
             try:
-                cost += deltas[forward_label.v, backward_label.v]
+                cost -= m * deltas[forward_label.v, backward_label.v]
             except KeyError:
-                cost += deltas[backward_label.v, forward_label.v]
+                cost -= m * deltas[backward_label.v, forward_label.v]
 
             forward_path_reverse = []
             backward_path = []
             while forward_label:
                 forward_path_reverse.append(forward_label.v)
+                if forward_label.v in epsilons:
+                    cost -= epsilons[forward_label.v]
                 forward_label = forward_label.l_bar
 
             while backward_label:
                 backward_path.append(backward_label.v)
+                if backward_label.v in epsilons:
+                    cost -= epsilons[backward_label.v]
                 backward_label = backward_label.l_bar
 
             path = Path(forward_path_reverse[::-1] + backward_path, cost)
             paths[hop].append(path)
-            if cost < 0:
-                # print(cost)
-                # print(path.path)
+            # print("path:{}, cost:{}".format(path.path, cost))
+            if cost < -0.001:
                 feasible_path.append([cost, path])
 
     # for hop, paths in paths.items():
@@ -217,26 +220,35 @@ class SpSovler:
 
                 sel_forward_labels = [label for label in forward_labels if label.z.hop == forward_hop]
                 sel_backward_labels = [label for label in backward_labels if label.z.hop == backward_hop]
-                # print(sel_forward_labels, sel_backward_labels)
+                # print("selected labels 1:\n{},\n{}".format(sel_forward_labels, len(sel_forward_labels)))
+                # print("selected labels 2:\n{},\n{}".format(sel_backward_labels, len(sel_backward_labels)))
 
                 for sel_forward_label in sel_forward_labels:
                     for sel_backward_label in sel_backward_labels:
                         if sel_forward_label.v != sel_backward_label.v:  # merge different hubs
-                            merged_label[allowed_hop + 1].append((sel_forward_label, sel_backward_label))
+                            # print("for \n{},\n length:{}".format(sel_forward_label, len(sel_forward_label)))
+                            # print("back \n{}, \n length:{}".format(sel_backward_label, len(sel_backward_label)))
+                            merged_label[allowed_hop + 1].append([sel_forward_label, sel_backward_label])
 
         # print("Get merged labels: \n")
         # pprint(dict(merged_label))
         # print("\n")
         # pprint(dict(merged_label)[3])
-        # print("\n")3
+        # print("\n")
         # pprint(dict(merged_label)[5])
 
-        paths = parse_path(merged_label, deltas=self.deltas, gamma=self.gamma_r)
+        paths = parse_path(merged_label, deltas=self.deltas, gamma=self.gamma_r, m=self.m_r, epsilons=self.epsilons)
         return paths
 
 
 if __name__ == "__main__":
     info = DATA.sp_info
     pprint(info)
-    r = ('o0', 'd0')
+    r = ('o4', 'd4')
     sp = SpSovler(r, info)
+    for cost, path_ in sp.feasible_path:
+        print("cost: {}, feasible path {}, cost:{}".format(cost, path_.path, path_.cost))
+    print("----------------------------------------------------")
+    for hop, paths_ in sp.path.items():
+        for path in paths_:
+            print("hop:{} all paths {}, cost:{}".format(hop, path.path, path.cost))

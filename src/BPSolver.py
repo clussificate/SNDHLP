@@ -149,11 +149,12 @@ class Node:
         # self.price_prb = self.build_price_prb()
 
         # column generation loop
-        max_iter_times = 2
+        max_iter_times = 10
         iter_time = 0
         int_res = None
         while iter_time < max_iter_times:
             iter_time += 1
+            print("--------------------------------------------------------")
             print("Current iter: {}".format(iter_time))
             master_prb, vars_tuple, constrs_tuple = self.build_master_prb()
             master_prb.setParam('outputflag', True)
@@ -166,7 +167,7 @@ class Node:
             dual_c3 = master_prb.getAttr("Pi", constrs_tuple.c3)
             dual_c4 = master_prb.getAttr("Pi", constrs_tuple.c4)
             dual_c5 = master_prb.getAttr("Pi", constrs_tuple.c5)
-            # print("vars: \n{}".format(master_prb.getVars()))
+            print("vars: \n{}".format(master_prb.getVars()))
             print("m_r:\n{}".format(self.m))
             print("c_s: {}:".format(self.c_s))
             print("l_a:\n{}".format(self.A_s))
@@ -186,10 +187,11 @@ class Node:
             # print("path:\n{}".format(self.path))
             # print("path_encoding:\n{}".format(self.path_encoding))
             # print("path_to_label:\n{}".format(self.path_to_label))
-            # print("label_to_path:\n{}".format(self.label_to_path))
+            print("label path {}".format(self.label_to_path))
             # print("path_i:\n{}".format(self.path_i))
             # print("path_a_t:\n{}".format(self.path_a_t))
             # print("path_a_s:\n{}".format(self.path_a_s))
+            # print("label hub {}".format(self.label_to_H))
 
             if no_negative_reduced_cost:  # no negative reduced cost, then branching if solutions are not integral.
                 if master_prb.status == GRB.OPTIMAL:
@@ -221,11 +223,9 @@ class Node:
     def build_master_prb(self):
         # initial RLPM
         model = gp.Model("RLPM")
-        print("label path {}".format(self.label_to_path))
-        print("label hub {}".format(self.label_to_H))
         # num_path = [(od, x) for od, paths in self.path.items() for x in range(paths)]  # ind for path variables
-        y = model.addVars(list(self.label_to_path), lb=0.0, ub=1.0, vtype=GRB.CONTINUOUS, name="y")
-        h = model.addVars(len(self.H), lb=0.0, ub=1, vtype=GRB.CONTINUOUS, name='h')
+        y = model.addVars(list(self.label_to_path), lb=0.0, ub=GRB.INFINITY, vtype=GRB.CONTINUOUS, name="y")
+        h = model.addVars(len(self.H), lb=0.0, ub=GRB.INFINITY, vtype=GRB.CONTINUOUS, name='h')
         t = model.addVars(len(self.A_t), lb=0.0, ub=GRB.INFINITY, vtype=GRB.CONTINUOUS, name="t")
 
 
@@ -280,7 +280,6 @@ class Node:
 
     def _price(self, *params):
         gammas, deltas, epsilons = params
-        new_path = {}
         info = {"c_s": self.info["road_fee"], "m_r": {}, "starts": {}, "ends": {},
                 "max_hop": self.info['max_hop'], "hubs": self.info['hubs'],
                 "gamma_r": {}, "delta_at": {}, "l_as": {}, "epsilon_h_r": {}}
@@ -301,6 +300,7 @@ class Node:
             for r, r_id in self.r_to_label.items():
                 info["epsilon_h_r"][hub, r] = epsilons[h_id, r_id]
 
+        pprint(info)
         # solve subproblem to find feasible path for each request.
         no_negative_reduced_cost = True
         for r, _ in self.r_to_label.items():
