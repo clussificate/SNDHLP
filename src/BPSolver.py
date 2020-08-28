@@ -13,7 +13,7 @@ from gurobipy import GRB
 from queue import LifoQueue, PriorityQueue
 from copy import deepcopy
 import pickle
-from collections import namedtuple
+from collections import namedtuple, defaultdict
 from SubprbSovler import SpSovler
 
 
@@ -50,6 +50,7 @@ class BPSolver:
             print("Current processing node: {}".format(iter_times))
             processing_node.process()
             iter_times += 1
+
 
 
 class Node:
@@ -220,6 +221,7 @@ class Node:
             # all integer, update the upper bound
             if lp_val < BPSolver.BEST_INTEGER_VAL:
                 BPSolver.BEST_INTEGER_VAL = lp_val
+                BPSolver.INC_SOL = self.parse_optimal_solution()
 
     def build_master_prb(self):
         # initial RLPM
@@ -233,7 +235,7 @@ class Node:
         c1 = model.addConstrs(
             (h[h_id] - 1 == 0.0 for h_id in self.label_to_H if self.label_to_H[h_id] in self.H_f))
 
-        c2 = model.addConstr(sum([x for _, x in h.items()]) - self.n_H, GRB.LESS_EQUAL,
+        c2 = model.addConstr(gp.quicksum([x for _, x in h.items()]) - self.n_H, GRB.LESS_EQUAL,
                              0.0)  # note that the single constraint
 
         c3 = model.addConstrs((y.sum(r_id, "*") == 1.0 for r_id in self.label_to_r))
@@ -249,8 +251,14 @@ class Node:
         #     for r_id in self.label_to_r:
         #         print(sum([y[r_id, p_id] for p_id in self.path_i[h_id][r_id]]) - h[h_id])
 
-        c5 = model.addConstrs((sum([y[r_id, p_id] for p_id in self.path_i[h_id][r_id]]) - h[h_id] <= 0.0
+        c5 = model.addConstrs((gp.quicksum([y[r_id, p_id] for p_id in self.path_i[h_id][r_id]]) - h[h_id] <= 0.0
                                for h_id in self.label_to_H for r_id in self.label_to_r))  # key: (h_id, r_id)
+
+        # add branch constraints
+        if self.branch_constraints["arc"]:
+            pass
+        if self.branch_constraints["path"]:
+            pass
 
         # add objective function
         obj = gp.LinExpr()
@@ -391,11 +399,11 @@ class Node:
         if res:
             return Node.FRACTIONAL_TEST_HUB, res
 
-        self._int_check_train()
+        res = self._int_check_train()
         if res:
             return Node.FRACTIONAL_TEST_TRAIN, res
 
-        self._int_check_path()
+        res = self._int_check_path()
         if res:
             return Node.FRACTIONAL_TEST_PATH
 
@@ -459,6 +467,7 @@ class Node:
             arc_t = int_res[1][0]
             num = int_res[1][1]
             node_left, node_right = self._branch_on_arc(arc_t, num)
+            return node_left, node_right
 
         if int_res[0] == Node.FRACTIONAL_TEST_PATH:
             pass
@@ -467,7 +476,7 @@ class Node:
         # left node, add the hub as a fixed hub
         Info_fix_to_one = deepcopy(self.info)
         Info_fix_to_one["fixed_hubs"].append(hub)
-        node_left = Node(Info_fix_to_one, [], self.path, self.bpsolver)
+        node_left = Node(Info_fix_to_one, self.branch_constraints, self.path, self.bpsolver)
 
         # right node, remove the hub
 
@@ -500,7 +509,7 @@ class Node:
                 if hub in path:
                     del_path[r].remove(path)
 
-        node_right = Node(Info_fix_to_zero, [], del_path, self.bpsolver)
+        node_right = Node(Info_fix_to_zero, self.branch_constraints, del_path, self.bpsolver)
         return node_left, node_right
 
     def _branch_on_arc(self, arc_t, num):
@@ -509,7 +518,8 @@ class Node:
 
         # left node
         if round_down == 0.0:
-            # the upper bound of the left branching node is zero, thus remove the arc.
+            # the upper bound of the left branching node is zero, thus remove the rail arc.
+            print("remove node {}".format(arc_t))
             info_left = deepcopy(self.info)
             branch_constraints_left = deepcopy(self.branch_constraints)
             info_left['A_t'].clear()
@@ -542,6 +552,34 @@ class Node:
 
         return node_left, node_right
 
+    def parse_optimal_solution(self):
+        y = self.var_tuple.y
+        h = self.var_tuple.h
+        t = self.var_tuple.t
+
+        sol = {"hub":[], "train":[], "path":{}}
+        hubs = []
+        paths = []
+        trains = []
+        for h_id, hub in self.label_to_H.items():
+            val = h[h_id].x
+            hubs.append((hub, val))
+        sol["hub"] = hubs
+
+        for arc_t_id, arc_t in self.label_to_at.items():
+            val = t[arc_t_id].x
+            trains.append((arc_t, val))
+        sol["train"] = trains
+
+        for r_id, path_ids in self.path_encoding.items():
+            r = self.label_to_r[r_id]
+            sol["path"][r] = []
+            for path_id in path_ids:
+                path = self.label_to_path[r_id, path_id]
+                val = y[r_id, path_id].x
+                sol["path"][r].append((path, val))
+
+        return sol
 
 if __name__ == "__main__":
     with open("info", "rb") as f:

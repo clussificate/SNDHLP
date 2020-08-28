@@ -28,7 +28,6 @@ class Path:
         self.path = path
         self.cost = cost
 
-
 class Node:
     def __init__(self, name, next_node=None):
         self.NAME = name
@@ -57,31 +56,34 @@ def parse_path(merged_label, deltas, gamma, m, epsilons):
     for hop, pairs in merged_label.items():
         for pair in pairs:
             forward_label, backward_label = pair
-            cost = forward_label.z.cost + backward_label.z.cost - gamma
+            # if merge arc not in arc_list, remove the path
+            if not ((forward_label.v, backward_label.v) in deltas or (backward_label.v, forward_label.v) in deltas):
+                continue
+            total_cost = forward_label.z.cost + backward_label.z.cost - gamma
             try:
-                cost -= m * deltas[forward_label.v, backward_label.v]
+                total_cost -= m * deltas[forward_label.v, backward_label.v]
             except KeyError:
-                cost -= m * deltas[backward_label.v, forward_label.v]
+                total_cost -= m * deltas[backward_label.v, forward_label.v]
 
             forward_path_reverse = []
             backward_path = []
             while forward_label:
                 forward_path_reverse.append(forward_label.v)
                 if forward_label.v in epsilons:
-                    cost -= epsilons[forward_label.v]
+                    total_cost -= epsilons[forward_label.v]
                 forward_label = forward_label.l_bar
 
             while backward_label:
                 backward_path.append(backward_label.v)
                 if backward_label.v in epsilons:
-                    cost -= epsilons[backward_label.v]
+                    total_cost -= epsilons[backward_label.v]
                 backward_label = backward_label.l_bar
 
-            path = Path(forward_path_reverse[::-1] + backward_path, cost)
+            path = Path(forward_path_reverse[::-1] + backward_path, total_cost)
             paths[hop].append(path)
             # print("path:{}, cost:{}".format(path.path, cost))
-            if cost < -0.001:
-                feasible_path.append([cost, path])
+            if total_cost < -0.001:
+                feasible_path.append([total_cost, path])
 
     # for hop, paths in paths.items():
     #     for path in paths:
@@ -109,7 +111,7 @@ class SpSovler:
         self.hubs = self.info['hubs']
 
         self.feasible_path = []
-        self.path = []
+        self.path = {}
         self.bidirectional_search(self.u)
 
     def monodirectional_search(self):
@@ -140,7 +142,6 @@ class SpSovler:
         # print("---------------Direction: {}----------------".format(direction))
         hubs = self.hubs[:]
         layers = [[source], first_layers]
-        number_of_layers = 0
         if direction == "forward":
             number_of_layers = math.floor(max_hop / 2) - 1  # number of copy layers
             layers.extend([hubs] * number_of_layers)
@@ -155,7 +156,15 @@ class SpSovler:
                 if layer_ind < total_num_layer - 1:
                     next_node_list = network[layer_ind + 1][:]  # defensive copy
                     for next_node in next_node_list:
-                        if node.NAME == next_node.NAME:
+                        # if current arc is road arc, continue
+                        if (node.NAME, next_node.NAME) in self.l_a or (next_node.NAME, node.NAME) in self.l_a:
+                            continue
+                        elif node.NAME == next_node.NAME:
+                            # remove self circulations
+                            next_node_list.remove(next_node)
+                        # remove nonexistent rail arcs
+                        elif ((node.NAME, next_node.NAME) not in self.deltas) and \
+                                ((next_node.NAME, node.NAME) not in self.deltas):
                             next_node_list.remove(next_node)
 
                     network[layer_ind][node_id].NEXT = next_node_list
@@ -237,14 +246,14 @@ class SpSovler:
         # print("\n")
         # pprint(dict(merged_label)[5])
 
-        paths = parse_path(merged_label, deltas=self.deltas, gamma=self.gamma_r, m=self.m_r, epsilons=self.epsilons)
-        return paths
+        paths, feasible_path = parse_path(merged_label, deltas=self.deltas, gamma=self.gamma_r, m=self.m_r, epsilons=self.epsilons)
+        return paths, feasible_path
 
 
 if __name__ == "__main__":
     info = DATA.sp_info
-    pprint(info)
-    r = ('o4', 'd4')
+    # pprint(info)
+    r = ('o1', 'd1')
     sp = SpSovler(r, info)
     for cost, path_ in sp.feasible_path:
         print("feasible path {}, cost:{}".format(path_.path, path_.cost))
