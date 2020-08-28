@@ -8,6 +8,11 @@
 import gurobipy as gp
 
 
+class MyException(Exception):
+    def __init__(self, err=None):
+        self.err = err
+        Exception.__init__(self, err)
+
 def parse_results(model: gp.Model) -> None:
     objVal = model.getObjective().getValue()
     print("Get optimal Obj: {}".format(objVal))

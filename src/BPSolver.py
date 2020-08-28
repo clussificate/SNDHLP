@@ -15,6 +15,7 @@ from copy import deepcopy
 import pickle
 from collections import namedtuple, defaultdict
 from SubprbSovler import SpSovler
+from utils import MyException
 
 
 class BPSolver:
@@ -52,7 +53,6 @@ class BPSolver:
             iter_times += 1
 
 
-
 class Node:
     FRACTIONAL_TEST_HUB = 1
     FRACTIONAL_TEST_TRAIN = 2
@@ -62,7 +62,8 @@ class Node:
         self.info = deepcopy(info)  # defensive copy
         self.path = deepcopy(path)
         self.bpsolver = bpsolver
-        self.branch_constraints = branch_constraints
+        self.branch_constraints = deepcopy(branch_constraints)
+        print("branch constrs : {}".format(self.branch_constraints))
         self.k_t = self.info['capacity']
         self.H = self.info['hubs']
         self.H_to_label = {}
@@ -163,8 +164,6 @@ class Node:
             master_prb.optimize()
 
             # get dual variable value
-            dual_c1 = master_prb.getAttr("Pi", constrs_tuple.c1)
-            dual_c2 = constrs_tuple.c2.pi
             dual_c3 = master_prb.getAttr("Pi", constrs_tuple.c3)
             dual_c4 = master_prb.getAttr("Pi", constrs_tuple.c4)
             dual_c5 = master_prb.getAttr("Pi", constrs_tuple.c5)
@@ -174,8 +173,6 @@ class Node:
             # print("l_a:\n{}".format(self.A_s))
             # print("label r:\n {}".format(self.label_to_r))
             # print("label arc_t:\n {}".format(self.label_to_at))
-            # print(" dual of c1:\n {}".format(dual_c1))
-            # print(" dual of c2:\n {}".format(dual_c2))
             # print(" gammas :\n {}".format(dual_c3))
             # print(" deltas :\n {}".format(dual_c4))
             # print(" epsilons:\n {}".format(dual_c5))
@@ -246,17 +243,31 @@ class Node:
                                - self.k_t * t[arc_t_id] <= 0
                                for arc_t_id in self.label_to_at))
 
+        c5 = model.addConstrs((gp.quicksum([y[r_id, p_id] for p_id in self.path_i[h_id][r_id]]) - h[h_id] <= 0.0
+                               for h_id in self.label_to_H for r_id in self.label_to_r))  # key: (h_id, r_id)
+
         # for h_id in self.label_to_H:
         #     print("-----------------------")
         #     for r_id in self.label_to_r:
         #         print(sum([y[r_id, p_id] for p_id in self.path_i[h_id][r_id]]) - h[h_id])
 
-        c5 = model.addConstrs((gp.quicksum([y[r_id, p_id] for p_id in self.path_i[h_id][r_id]]) - h[h_id] <= 0.0
-                               for h_id in self.label_to_H for r_id in self.label_to_r))  # key: (h_id, r_id)
-
-        # add branch constraints
+        # add branch constraints:
+        # @example {'arc': [[('H0', 'H4'), 'GREATER_EQUAL', 1]], 'path': []}
         if self.branch_constraints["arc"]:
-            pass
+            for constr in self.branch_constraints["arc"]:
+                if constr[0] in self.at_to_label:
+                    arc = constr[0]
+                else:
+                    arc = (constr[0][1], constr[0][1])
+                arc_id = self.at_to_label[arc]
+
+                if constr[1] == "GREATER_EQUAL":
+                    model.addConstr(t[arc_id], GRB.GREATER_EQUAL, constr[2], name="B")
+                elif constr[1] == "LESS_EQUAL":
+                    model.addConstr(t[arc_id], GRB.LESS_EQUAL, constr[2], name="B")
+                else:
+                    raise MyException("Incorrect sense type.")
+
         if self.branch_constraints["path"]:
             pass
 
@@ -405,7 +416,7 @@ class Node:
 
         res = self._int_check_path()
         if res:
-            return Node.FRACTIONAL_TEST_PATH
+            return Node.FRACTIONAL_TEST_PATH, res
 
         return None
 
@@ -455,7 +466,15 @@ class Node:
         integer check on path variables
         :return: fractional path variables
         """
-        pass
+        for pr_id, path in self.label_to_path.items():
+            val = self.var_tuple.y[pr_id].x
+            if val < 0.001 or val > 0.999:
+                continue
+            else:
+                # get a fractional path variable
+                return path
+
+        return None
 
     def _branch(self, int_res):
         if int_res[0] == Node.FRACTIONAL_TEST_HUB:
@@ -470,7 +489,10 @@ class Node:
             return node_left, node_right
 
         if int_res[0] == Node.FRACTIONAL_TEST_PATH:
-            pass
+            path = int_res[1]
+            node_left, node_right = self._branch_on_path(path)
+            return node_left, node_right
+
 
     def _branch_on_hub(self, hub):
         # left node, add the hub as a fixed hub
@@ -533,9 +555,9 @@ class Node:
             for r, paths in del_path.items():
                 for path in paths:
                     for ind, node in enumerate(path[0: -1]):
-                        if arc_t == (node, path[ind+1]):
+                        if arc_t == (node, path[ind + 1]):
                             del_path[r].remove(path)
-                        if (arc_t[1], arc_t[0]) == (node, path[ind+1]):
+                        if (arc_t[1], arc_t[0]) == (node, path[ind + 1]):
                             del_path[r].remove(path)
             node_left = Node(info_left, branch_constraints_left, del_path, self.bpsolver)
         else:
@@ -547,7 +569,7 @@ class Node:
         # right node
         Info_right = deepcopy(self.info)
         branch_constraints_right = deepcopy(self.branch_constraints)
-        branch_constraints_right['arc'].append([arc_t, "LARGER_EQUAL", round_up])
+        branch_constraints_right['arc'].append([arc_t, "GREATER_EQUAL", round_up])
         node_right = Node(Info_right, branch_constraints_right, self.path, self.bpsolver)
 
         return node_left, node_right
@@ -557,15 +579,14 @@ class Node:
         h = self.var_tuple.h
         t = self.var_tuple.t
 
-        sol = {"hub":[], "train":[], "path":{}}
+        sol = {"hub": [], "train": [], "path": {}}
         hubs = []
-        paths = []
-        trains = []
         for h_id, hub in self.label_to_H.items():
             val = h[h_id].x
             hubs.append((hub, val))
         sol["hub"] = hubs
 
+        trains = []
         for arc_t_id, arc_t in self.label_to_at.items():
             val = t[arc_t_id].x
             trains.append((arc_t, val))
@@ -578,8 +599,12 @@ class Node:
                 path = self.label_to_path[r_id, path_id]
                 val = y[r_id, path_id].x
                 sol["path"][r].append((path, val))
-
         return sol
+
+    def _branch_on_path(self, path):
+
+        pass
+
 
 if __name__ == "__main__":
     with open("info", "rb") as f:
