@@ -168,9 +168,9 @@ class SpSovler:
         #                                                layer}))
 
         backward_network = self.gen_network(destination, ends, max_hop, direction="backward")
-        print("Generate backward_network: \n{}".format({str(node.NAME) + "_" + str(layer_id): parse_node(node.NEXT)
-                                                        for layer_id, layer in enumerate(backward_network) for node in
-                                                        layer}))
+        # print("Generate backward_network: \n{}".format({str(node.NAME) + "_" + str(layer_id): parse_node(node.NEXT)
+        #                                                 for layer_id, layer in enumerate(backward_network) for node in
+        #                                                 layer}))
         forward_labels = self.gen_label(network=forward_network)
         backward_labels = self.gen_label(network=backward_network)
         paths, feasible_path = self.merge_label(forward_labels, backward_labels, max_hop)

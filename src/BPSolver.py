@@ -17,8 +17,6 @@ import pickle
 from collections import namedtuple, defaultdict
 from SubprbSovler import SpSovler
 from utils import MyException
-from dataclasses import dataclass, field
-from typing import Any
 
 
 class BPSolver:
@@ -33,7 +31,7 @@ class BPSolver:
 
     def add_node(self, lpbound, node):
         self.pending_nodes.put(node)
-        # self.pending_nodes_best_bound.put((lpbound, node))  # best first search
+        self.pending_nodes_best_bound.put((lpbound, node))  # best first search
 
     def solve(self):
         # create root node
@@ -71,10 +69,7 @@ class BPSolver:
                 print("Path: {}, is used: {}".format(path_val[0], path_val[1]))
 
 
-@dataclass(order=True)
 class Node:
-    priority: int
-    item: Any=field(compare=False)
     FRACTIONAL_TEST_HUB = 1
     FRACTIONAL_TEST_TRAIN = 2
     FRACTIONAL_TEST_PATH = 3
@@ -161,13 +156,17 @@ class Node:
         self.price_prb = None
         self.solved = False
 
+    def __lt__(self, other):
+        # make Node class comparable (used for PriorityQueue)
+        return True
+
     def process(self):
         if not self.solved:
             print("------------------------------------------------")
             print("Enter node")
             print("branch constrs : {}".format(self.branch_constraints))
             print("Current info:")
-            pprint(self.info)
+            # pprint(self.info)
             self._solve_lp()
 
     def _solve_lp(self):
@@ -193,9 +192,9 @@ class Node:
             dual_c_enforce = master_prb.getAttr("Pi", constrs_tuple.c_enforce)
             dual_c_forbid = master_prb.getAttr("Pi", constrs_tuple.c_forbid)
 
-            print("m_r:\n{}".format(self.m))
-            print("c_s: {}:".format(self.c_s))
-            print("l_a:\n{}".format(self.A_s))
+            # print("m_r:\n{}".format(self.m))
+            # print("c_s: {}:".format(self.c_s))
+            # print("l_a:\n{}".format(self.A_s))
             # print(" gammas :\n {}".format(dual_c3))
             # print(" deltas :\n {}".format(dual_c4))
             # print(" epsilons:\n {}".format(dual_c5))
@@ -396,7 +395,7 @@ class Node:
             for r, r_id in self.r_to_label.items():
                 info["epsilon_h_r"][hub, r] = epsilons[h_id, r_id]
 
-        pprint(info)
+        # pprint(info)
         # solve subproblem to find feasible path for each request.
         no_negative_reduced_cost = True
         for r, _ in self.r_to_label.items():
