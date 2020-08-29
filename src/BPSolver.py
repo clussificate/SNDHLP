@@ -17,6 +17,8 @@ import pickle
 from collections import namedtuple, defaultdict
 from SubprbSovler import SpSovler
 from utils import MyException
+from dataclasses import dataclass, field
+from typing import Any
 
 
 class BPSolver:
@@ -31,11 +33,11 @@ class BPSolver:
 
     def add_node(self, lpbound, node):
         self.pending_nodes.put(node)
-        self.pending_nodes_best_bound.put((lpbound, node))  # best first search
+        # self.pending_nodes_best_bound.put((lpbound, node))  # best first search
 
     def solve(self):
         # create root node
-        initial_constraints = {"arc": [], "path": []}
+        initial_constraints = {"arc": [], "path": {}}
         initial_path = {}
         for r in self.R:
             initial_path[r] = []
@@ -69,7 +71,10 @@ class BPSolver:
                 print("Path: {}, is used: {}".format(path_val[0], path_val[1]))
 
 
+@dataclass(order=True)
 class Node:
+    priority: int
+    item: Any=field(compare=False)
     FRACTIONAL_TEST_HUB = 1
     FRACTIONAL_TEST_TRAIN = 2
     FRACTIONAL_TEST_PATH = 3
@@ -79,7 +84,6 @@ class Node:
         self.path = deepcopy(path)
         self.bpsolver = bpsolver
         self.branch_constraints = deepcopy(branch_constraints)
-        print("branch constrs : {}".format(self.branch_constraints))
         self.k_t = self.info['capacity']
         self.H = self.info['hubs']
         self.H_to_label = {}
@@ -159,7 +163,11 @@ class Node:
 
     def process(self):
         if not self.solved:
+            print("------------------------------------------------")
             print("Enter node")
+            print("branch constrs : {}".format(self.branch_constraints))
+            print("Current info:")
+            pprint(self.info)
             self._solve_lp()
 
     def _solve_lp(self):
@@ -169,7 +177,6 @@ class Node:
         # column generation loop
         max_iter_times = 50
         iter_time = 0
-        int_res = None
         while iter_time < max_iter_times:
             iter_time += 1
             print("--------------------------------------------------------")
@@ -186,12 +193,9 @@ class Node:
             dual_c_enforce = master_prb.getAttr("Pi", constrs_tuple.c_enforce)
             dual_c_forbid = master_prb.getAttr("Pi", constrs_tuple.c_forbid)
 
-            # print("vars: \n{}".format(master_prb.getVars()))
-            # print("m_r:\n{}".format(self.m))
-            # print("c_s: {}:".format(self.c_s))
-            # print("l_a:\n{}".format(self.A_s))
-            # print("label r:\n {}".format(self.label_to_r))
-            # print("label arc_t:\n {}".format(self.label_to_at))
+            print("m_r:\n{}".format(self.m))
+            print("c_s: {}:".format(self.c_s))
+            print("l_a:\n{}".format(self.A_s))
             # print(" gammas :\n {}".format(dual_c3))
             # print(" deltas :\n {}".format(dual_c4))
             # print(" epsilons:\n {}".format(dual_c5))
@@ -202,6 +206,9 @@ class Node:
 
             no_negative_reduced_cost = self._price(gammas=dual_c3, deltas=dual_c4, epsilons=dual_c5,
                                                    alphas=dual_c_enforce, betas=dual_c_forbid)
+
+            # print("label r:\n {}".format(self.label_to_r))
+            # print("label arc_t:\n {}".format(self.label_to_at))
             # print("path:\n{}".format(self.path))
             # print("path_encoding:\n{}".format(self.path_encoding))
             # print("path_to_label:\n{}".format(self.path_to_label))
@@ -211,32 +218,34 @@ class Node:
             # print("path_a_s:\n{}".format(self.path_a_s))
             # print("label hub {}".format(self.label_to_H))
 
+            self.master_prb = master_prb
+            self.constraint_tuple = constrs_tuple
+            self.var_tuple = vars_tuple
             if no_negative_reduced_cost:  # no negative reduced cost, then branching if solutions are not integral.
+                print("master problem: solved")
                 if master_prb.status == GRB.OPTIMAL:
-                    self.master_prb = master_prb
-                    self.constraint_tuple = constrs_tuple
-                    self.var_tuple = vars_tuple
+                    self.solved = True
                     print("master val: {}".format(master_prb.getObjective().getValue()))
                 else:
                     print("master infeasible.")
                 break
-        self.solved = True
 
         # if current lp solution value > current best integer solution value, no need to branch.
         lp_val = self.master_prb.getObjective().getValue()
         if lp_val > BPSolver.BEST_INTEGER_VAL:
+            print("current LP val > BEST_INTEGER_VAL, stop branching.")
             return
 
-        # integrality  check.
+        #  integrality  check.
         int_res = self._int_check()
-
         if int_res is not None:
             node1, node2 = self._branch(int_res)
             self.bpsolver.add_node(lp_val, node1)
-            self.bpsolver.add_node(lp_val, node2)
+            self.bpsolver.add_node(lp_val, node2)   # safety add for priority queue.
         else:
             # all integer, update the upper bound
             if lp_val < BPSolver.BEST_INTEGER_VAL:
+                print("Find a better integer solution")
                 BPSolver.BEST_INTEGER_VAL = lp_val
                 BPSolver.INC_SOL = self.parse_optimal_solution()
 
@@ -272,13 +281,16 @@ class Node:
         #         print(sum([y[r_id, p_id] for p_id in self.path_i[h_id][r_id]]) - h[h_id])
 
         # add branch constraints:
-        # @example {'arc': [[('H0', 'H4'), 'GREATER_EQUAL', 1]], 'path': []}
+        # @example {'arc': [[('H1', 'H9'), 'LESS_EQUAL', 3]], 'path': []}
         if self.branch_constraints["arc"]:
             for constr in self.branch_constraints["arc"]:
                 if constr[0] in self.at_to_label:
                     arc = constr[0]
+                elif (constr[0][1], constr[0][0]) in self.at_to_label:
+                    arc = (constr[0][1], constr[0][0])
                 else:
-                    arc = (constr[0][1], constr[0][1])
+                    # the arc has been removed.
+                    continue
                 arc_id = self.at_to_label[arc]
 
                 if constr[1] == "GREATER_EQUAL":
@@ -298,16 +310,24 @@ class Node:
             for request, content in self.branch_constraints["path"].items():
                 for path in self.path[request]:
                     rp_id = self.path_to_label[str(path)]
+
                     for enforce_requirement in content["ENFORCE"]:
                         # path variables not fulfilling enforce requirement are set to zero
                         sel_ind, sel_arc = enforce_requirement
+                        if len(path) - 1 < sel_ind:
+                            # the maximal hop of current path is less than the selected hop
+                            continue
                         if (path[sel_ind - 1], path[sel_ind]) != sel_arc:
                             c_enforce[rp_id] = model.addConstr(y[rp_id] == 0.0)
+
                     for forbid_requirement in content["FORBID"]:
                         # the upper bound of all paths fulfilling forbid requirement are set to zero
                         sel_ind, sel_arc = forbid_requirement
+                        if len(path) - 1 < sel_ind:
+                            # the maximal hop of current path is less than the selected hop
+                            continue
                         if (path[sel_ind - 1], path[sel_ind]) == sel_arc:
-                            c_forbid[rp_id, 1] = model.addConstr(y[rp_id] <= 0.0)
+                            c_forbid[rp_id] = model.addConstr(y[rp_id] <= 0.0)
 
         # add objective function
         obj = gp.LinExpr()
@@ -357,14 +377,14 @@ class Node:
             for rp_id, val in alphas.items():
                 r_id, p_id = rp_id
                 info["alphas"][self.label_to_r[r_id]] = {}
-                info["alphas"][self.label_to_r[r_id]][str(self.label_to_path[p_id])] = val
+                info["alphas"][self.label_to_r[r_id]][str(self.label_to_path[rp_id])] = val
 
         if betas:
             # if have branching path forbid variables
             for rp_id, val in betas.items():
                 r_id, p_id = rp_id
                 info["betas"][self.label_to_r[r_id]] = {}
-                info["betas"][self.label_to_r[r_id]][str(self.label_to_path[p_id])] = val
+                info["betas"][self.label_to_r[r_id]][str(self.label_to_path[rp_id])] = val
 
         for arc_s, length in self.info["A_s"].items():
             info["l_as"][arc_s] = length
@@ -376,7 +396,7 @@ class Node:
             for r, r_id in self.r_to_label.items():
                 info["epsilon_h_r"][hub, r] = epsilons[h_id, r_id]
 
-        # pprint(info)
+        pprint(info)
         # solve subproblem to find feasible path for each request.
         no_negative_reduced_cost = True
         for r, _ in self.r_to_label.items():
@@ -409,6 +429,7 @@ class Node:
             arc_map = self.label_to_as
         else:
             raise Exception()
+
         arc = arc_map[a_id]
         start, end = arc
         for r_id, p_ids in self.path_encoding.items():
@@ -416,7 +437,7 @@ class Node:
             for p_id in p_ids:
                 p = self.label_to_path[r_id, p_id]
                 for ind, node in enumerate(p[:-1]):
-                    if p[ind] == start and p[ind + 1] == end:
+                    if (p[ind] == start and p[ind + 1] == end) or (p[ind] == end and p[ind + 1] == start):
                         sel_pid.append(p_id)
             res[r_id] = sel_pid
         return res
@@ -548,7 +569,7 @@ class Node:
         if int_res[0] == Node.FRACTIONAL_TEST_TRAIN:
             arc_t = int_res[1][0]
             num = int_res[1][1]
-            node_left, node_right = self._branch_on_arc(arc_t, num)
+            node_left, node_right = self._branch_on_train(arc_t, num)
             return node_left, node_right
 
         if int_res[0] == Node.FRACTIONAL_TEST_PATH:
@@ -564,18 +585,20 @@ class Node:
         node_left = Node(Info_fix_to_one, self.branch_constraints, self.path, self.bpsolver)
 
         # right node, remove the hub
-
+        print("remove hub: {}".format(hub))
         Info_fix_to_zero = deepcopy(self.info)
         Info_fix_to_zero["A_t"].clear()
         Info_fix_to_zero["A_s"].clear()
         # remove the hub in starts, ends, hubs, and fixed_hubs.
-        Info_fix_to_zero["fixed_hubs"].remove(hub)
+        if hub in Info_fix_to_zero["fixed_hubs"]:
+            Info_fix_to_zero["fixed_hubs"].remove(hub)
         Info_fix_to_zero["hubs"].remove(hub)
+
         for r, content in Info_fix_to_zero["requests"].items():
             if hub in content['starts']:
-                Info_fix_to_zero[r]["starts"].remove(hub)
+                content["starts"].remove(hub)
             if hub in content['ends']:
-                Info_fix_to_zero[r]["ends"].remove(hub)
+                content["ends"].remove(hub)
 
         for arc_t, dis in self.info["A_t"].items():
             if hub in arc_t:
@@ -597,14 +620,14 @@ class Node:
         node_right = Node(Info_fix_to_zero, self.branch_constraints, del_path, self.bpsolver)
         return node_left, node_right
 
-    def _branch_on_arc(self, arc_t, num):
+    def _branch_on_train(self, arc_t, num):
         round_up = math.ceil(num)
         round_down = math.floor(num)
 
         # left node
         if round_down == 0.0:
             # the upper bound of the left branching node is zero, thus remove the rail arc.
-            print("remove node {}".format(arc_t))
+            print("remove arc {}".format(arc_t))
             info_left = deepcopy(self.info)
             branch_constraints_left = deepcopy(self.branch_constraints)
             info_left['A_t'].clear()
@@ -651,21 +674,25 @@ class Node:
         # random select an arc in the path as the selected arc
         sel_ind = np.random.choice(list(range(1, len(path))))
         sel_arc = (path[sel_ind - 1], path[sel_ind])
-
+        print("remove arc {} on hop {}".format(sel_arc, sel_ind))
         # enforce to use this arc in this hop
         info_fix_one = deepcopy(self.info)
         branch_constrains_left = deepcopy(self.branch_constraints)
-        if not branch_constrains_left["path"][request]:
-            branch_constrains_left["path"][request] = {"ENFORCE": [], "FORBID": []}
+        if request in branch_constrains_left["path"]:
             branch_constrains_left["path"][request]["ENFORCE"].append([sel_ind, sel_arc])
         else:
+            branch_constrains_left["path"][request] = {"ENFORCE": [], "FORBID": []}
             branch_constrains_left["path"][request]["ENFORCE"].append([sel_ind, sel_arc])
         node_left = Node(info_fix_one, branch_constrains_left, self.path, self.bpsolver)
 
         # forbid to use this arc in this hop
         info_fix_zero = deepcopy(self.info)
         branch_constrains_right = deepcopy(self.branch_constraints)
-        branch_constrains_right["path"][request]["FORBID"].append([sel_ind, sel_arc])
+        if request in branch_constrains_right["path"]:
+            branch_constrains_right["path"][request]["FORBID"].append([sel_ind, sel_arc])
+        else:
+            branch_constrains_right["path"][request] = {"ENFORCE": [], "FORBID": []}
+            branch_constrains_right["path"][request]["FORBID"].append([sel_ind, sel_arc])
         node_right = Node(info_fix_zero, branch_constrains_right, self.path, self.bpsolver)
 
         return node_left, node_right

@@ -13,6 +13,7 @@ from copy import deepcopy
 from collections import namedtuple, defaultdict
 from queue import PriorityQueue
 import math
+from utils import MyException
 
 # label
 #     v: from the origin to a node v;     l_bar: previous label;     z: vector of resource consumptions
@@ -28,6 +29,7 @@ class Path:
     def __init__(self, path, cost):
         self.path = path
         self.cost = cost
+
 
 class Node:
     def __init__(self, name, next_node=None):
@@ -90,11 +92,17 @@ def parse_path(merged_label, deltas, gamma, m, epsilons, alphas, betas, branch_p
             hop_satisfy = True
             for enforce_requirement in branch_path_constrains["ENFORCE"]:
                 sel_ind, sel_arc = enforce_requirement
-                if (path.path[sel_ind-1], path.path[sel_ind]) != sel_arc:
+                if len(path.path) - 1 < sel_ind:
+                    # the max hop of current path less than the selected hop
+                    continue
+                if (path.path[sel_ind - 1], path.path[sel_ind]) != sel_arc:
                     hop_satisfy = False
             for forbid_requirement in branch_path_constrains["FORBID"]:
                 sel_ind, sel_arc = forbid_requirement
-                if (path.path[sel_ind-1], path.path[sel_ind]) == sel_arc:
+                if len(path.path) - 1 < sel_ind:
+                    # the max hop of current path less than the selected hop
+                    continue
+                if (path.path[sel_ind - 1], path.path[sel_ind]) == sel_arc:
                     hop_satisfy = False
 
             if hop_satisfy:
@@ -160,9 +168,9 @@ class SpSovler:
         #                                                layer}))
 
         backward_network = self.gen_network(destination, ends, max_hop, direction="backward")
-        # print("Generate backward_network: \n{}".format({str(node.NAME) + "_" + str(layer_id): parse_node(node.NEXT)
-        #                                                 for layer_id, layer in enumerate(backward_network) for node in
-        #                                                 layer}))
+        print("Generate backward_network: \n{}".format({str(node.NAME) + "_" + str(layer_id): parse_node(node.NEXT)
+                                                        for layer_id, layer in enumerate(backward_network) for node in
+                                                        layer}))
         forward_labels = self.gen_label(network=forward_network)
         backward_labels = self.gen_label(network=backward_network)
         paths, feasible_path = self.merge_label(forward_labels, backward_labels, max_hop)
@@ -186,7 +194,9 @@ class SpSovler:
             for node_id, node in enumerate(layer):
                 if layer_ind < total_num_layer - 1:
                     next_node_list = network[layer_ind + 1][:]  # defensive copy
-                    for next_node in next_node_list:
+
+                    # safely iter on raw data. remove method will cause inconsistent iter
+                    for next_node in network[layer_ind + 1]:
                         # if current arc is road arc, continue
                         if (node.NAME, next_node.NAME) in self.l_a or (next_node.NAME, node.NAME) in self.l_a:
                             continue
@@ -197,7 +207,8 @@ class SpSovler:
                         elif ((node.NAME, next_node.NAME) not in self.deltas) and \
                                 ((next_node.NAME, node.NAME) not in self.deltas):
                             next_node_list.remove(next_node)
-
+                        else:
+                            continue
                     network[layer_ind][node_id].NEXT = next_node_list
         return network
 
@@ -229,16 +240,16 @@ class SpSovler:
         return labels
 
     def get_cost(self, source, sink):
-        if (source, sink) in self.l_a or (sink, source) in self.l_a:
-            try:
-                arc_cost = self.c_s * self.m_r * self.l_a[source, sink]
-            except KeyError:
-                arc_cost = self.c_s * self.m_r * self.l_a[sink, source]
+        if (source, sink) in self.l_a:
+            arc_cost = self.c_s * self.m_r * self.l_a[source, sink]
+        elif (sink, source) in self.l_a:
+            arc_cost = self.c_s * self.m_r * self.l_a[sink, source]
+        elif (source, sink) in self.deltas:
+            arc_cost = -self.m_r * self.deltas[source, sink]
+        elif (sink, source) in self.deltas:
+            arc_cost = -self.m_r * self.deltas[sink, source]
         else:
-            try:
-                arc_cost = -self.m_r * self.deltas[source, sink]
-            except KeyError:
-                arc_cost = -self.m_r * self.deltas[sink, source]
+            raise MyException("Key Error:{}".format((source, sink)))
         cost = arc_cost - self.epsilons[sink]
         return cost
 
@@ -285,8 +296,8 @@ class SpSovler:
 
 if __name__ == "__main__":
     info = DATA.sp_info
-    # pprint(info)
-    r = ('o1', 'd1')
+    pprint(info)
+    r = ('o2', 'd2')
     sp = SpSovler(r, info)
     for cost, path_ in sp.feasible_path:
         print("feasible path {}, cost:{}".format(path_.path, path_.cost))
