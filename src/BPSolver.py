@@ -7,6 +7,7 @@
 A branch-and-price-and-cut algorithm for service network design and hub location problem.
 """
 import math
+import numpy as np
 from pprint import pprint
 import gurobipy as gp
 from gurobipy import GRB
@@ -51,6 +52,21 @@ class BPSolver:
             print("Current processing node: {}".format(iter_times))
             processing_node.process()
             iter_times += 1
+
+        # print solution.
+        print("Optimal obj value {}".format(BPSolver.BEST_INTEGER_VAL))
+
+        for hub_val in BPSolver.INC_SOL["hub"]:
+            print("Hub: {}, is open: {}".format(hub_val[0], hub_val[1]))
+
+        for train_val in BPSolver.INC_SOL["train"]:
+            print("Arc: {}, number of trains: {}".format(train_val[0], train_val[1]))
+
+        for request, paths in BPSolver.INC_SOL["path"].items():
+
+            print("Request: {}".format(request))
+            for path_val in paths:
+                print("Path: {}, is used: {}".format(path_val[0], path_val[1]))
 
 
 class Node:
@@ -167,6 +183,9 @@ class Node:
             dual_c3 = master_prb.getAttr("Pi", constrs_tuple.c3)
             dual_c4 = master_prb.getAttr("Pi", constrs_tuple.c4)
             dual_c5 = master_prb.getAttr("Pi", constrs_tuple.c5)
+            dual_c_enforce = master_prb.getAttr("Pi", constrs_tuple.c_enforce)
+            dual_c_forbid = master_prb.getAttr("Pi", constrs_tuple.c_forbid)
+
             # print("vars: \n{}".format(master_prb.getVars()))
             # print("m_r:\n{}".format(self.m))
             # print("c_s: {}:".format(self.c_s))
@@ -181,7 +200,8 @@ class Node:
                 for var in master_prb.getVars():
                     print("varName: {}, value: {}, reduced cost:{}".format(var.VarName, var.x, var.RC))
 
-            no_negative_reduced_cost = self._price(dual_c3, dual_c4, dual_c5)
+            no_negative_reduced_cost = self._price(gammas=dual_c3, deltas=dual_c4, epsilons=dual_c5,
+                                                   alphas=dual_c_enforce, betas=dual_c_forbid)
             # print("path:\n{}".format(self.path))
             # print("path_encoding:\n{}".format(self.path_encoding))
             # print("path_to_label:\n{}".format(self.path_to_label))
@@ -268,8 +288,26 @@ class Node:
                 else:
                     raise MyException("Incorrect sense type.")
 
+        # path branch constraints:
+        # @example {'path': {(o1, d1):
+        # {"ENFORCE": [[sel_ind, sel_arc],[sel_ind, sel_arc],...],  "FORBID": [[sel_ind, sel_arc],...]}   }}
+
+        c_enforce = {}  # key :(r_id, p_id)
+        c_forbid = {}  # key (r_id, p_id)
         if self.branch_constraints["path"]:
-            pass
+            for request, content in self.branch_constraints["path"].items():
+                for path in self.path[request]:
+                    rp_id = self.path_to_label[str(path)]
+                    for enforce_requirement in content["ENFORCE"]:
+                        # path variables not fulfilling enforce requirement are set to zero
+                        sel_ind, sel_arc = enforce_requirement
+                        if (path[sel_ind - 1], path[sel_ind]) != sel_arc:
+                            c_enforce[rp_id] = model.addConstr(y[rp_id] == 0.0)
+                    for forbid_requirement in content["FORBID"]:
+                        # the upper bound of all paths fulfilling forbid requirement are set to zero
+                        sel_ind, sel_arc = forbid_requirement
+                        if (path[sel_ind - 1], path[sel_ind]) == sel_arc:
+                            c_forbid[rp_id, 1] = model.addConstr(y[rp_id] <= 0.0)
 
         # add objective function
         obj = gp.LinExpr()
@@ -292,22 +330,41 @@ class Node:
         Var = namedtuple('Variables', ['y', 'h', 't'])
         var = Var(y, h, t)
 
-        Constr = namedtuple('Constraints', ['c1', 'c2', 'c3', 'c4', 'c5'])
-        constr = Constr(c1, c2, c3, c4, c5)
+        Constr = namedtuple('Constraints', ['c1', 'c2', 'c3', 'c4', 'c5', 'c_enforce', "c_forbid"])
+        constr = Constr(c1, c2, c3, c4, c5, c_enforce, c_forbid)
 
         return model, var, constr
 
-    def _price(self, *params):
-        gammas, deltas, epsilons = params
+    def _price(self, **params):
+        gammas = params["gammas"]
+        deltas = params["deltas"]
+        epsilons = params["epsilons"]
+        alphas = params["alphas"]
+        betas = params["betas"]
         info = {"c_s": self.info["road_fee"], "m_r": {}, "starts": {}, "ends": {},
                 "max_hop": self.info['max_hop'], "hubs": self.info['hubs'],
-                "gamma_r": {}, "delta_at": {}, "l_as": {}, "epsilon_h_r": {}}
+                "gamma_r": {}, "delta_at": {}, "l_as": {}, "epsilon_h_r": {},
+                "alphas": {}, "betas": {}, "branch_path_constrains": self.branch_constraints["path"]}
 
         for r, content in self.R.items():
             info["m_r"][r] = content["demand"]
             info["starts"][r] = content["starts"]
             info["ends"][r] = content["ends"]
             info["gamma_r"][r] = gammas[self.r_to_label[r]]
+
+        if alphas:
+            # if have branching path enforce variables
+            for rp_id, val in alphas.items():
+                r_id, p_id = rp_id
+                info["alphas"][self.label_to_r[r_id]] = {}
+                info["alphas"][self.label_to_r[r_id]][str(self.label_to_path[p_id])] = val
+
+        if betas:
+            # if have branching path forbid variables
+            for rp_id, val in betas.items():
+                r_id, p_id = rp_id
+                info["betas"][self.label_to_r[r_id]] = {}
+                info["betas"][self.label_to_r[r_id]][str(self.label_to_path[p_id])] = val
 
         for arc_s, length in self.info["A_s"].items():
             info["l_as"][arc_s] = length
@@ -325,6 +382,7 @@ class Node:
         for r, _ in self.r_to_label.items():
             feasible_path = SpSovler(r, info).feasible_path
             if feasible_path:
+                # find new feasible path, add the column.
                 self.update_paras(r, feasible_path)
                 no_negative_reduced_cost = False
         return no_negative_reduced_cost
@@ -406,6 +464,9 @@ class Node:
             self.path_a_t[arc_t_id][r_id].append(path_id)
 
     def _int_check(self):
+        """
+        :return: (fractional flag, information tuple)
+        """
         res = self._int_check_hub()
         if res:
             return Node.FRACTIONAL_TEST_HUB, res
@@ -433,9 +494,9 @@ class Node:
             num = 0
             for r_id, r in self.label_to_r.items():
                 for path_ in self.path[r]:
-                    path_id = self.path_to_label[str(path_)]
+                    rp_id = self.path_to_label[str(path_)]
                     if hub in path_:
-                        num += self.var_tuple.y[path_id].x * self.m[r]
+                        num += self.var_tuple.y[rp_id].x * self.m[r]
 
             hub_sol.append((num, hub))
         hub_sol.sort(key=lambda x: x[0], reverse=True)
@@ -466,13 +527,15 @@ class Node:
         integer check on path variables
         :return: fractional path variables
         """
-        for pr_id, path in self.label_to_path.items():
-            val = self.var_tuple.y[pr_id].x
+        for rp_id, path in self.label_to_path.items():
+            r_id, _ = rp_id
+            request = self.label_to_r[r_id]
+            val = self.var_tuple.y[rp_id].x
             if val < 0.001 or val > 0.999:
                 continue
             else:
                 # get a fractional path variable
-                return path
+                return path, request
 
         return None
 
@@ -489,10 +552,10 @@ class Node:
             return node_left, node_right
 
         if int_res[0] == Node.FRACTIONAL_TEST_PATH:
-            path = int_res[1]
-            node_left, node_right = self._branch_on_path(path)
+            path = int_res[1][0]
+            request = int_res[1][1]
+            node_left, node_right = self._branch_on_path(path, request)
             return node_left, node_right
-
 
     def _branch_on_hub(self, hub):
         # left node, add the hub as a fixed hub
@@ -574,6 +637,39 @@ class Node:
 
         return node_left, node_right
 
+    def _branch_on_path(self, path, request):
+        """
+        The second possibility to branch on path variables uses the idea to
+        forbid and enforce arcs for use on certain stages of a path for a request.
+        In the branch in which an arc is forbidden,
+        the upper bound of all paths using this arc on the chosen stage is set to zero,
+        and the arc is excluded from the pricing algorithm at this stage. In the other branch,
+        in which the arc is enforced to be used by this request on the requested stage,
+        all path variables not fulfilling this requirement are set to zero,
+        and the pricing problem excludes all other arcs on this stage.
+        """
+        # random select an arc in the path as the selected arc
+        sel_ind = np.random.choice(list(range(1, len(path))))
+        sel_arc = (path[sel_ind - 1], path[sel_ind])
+
+        # enforce to use this arc in this hop
+        info_fix_one = deepcopy(self.info)
+        branch_constrains_left = deepcopy(self.branch_constraints)
+        if not branch_constrains_left["path"][request]:
+            branch_constrains_left["path"][request] = {"ENFORCE": [], "FORBID": []}
+            branch_constrains_left["path"][request]["ENFORCE"].append([sel_ind, sel_arc])
+        else:
+            branch_constrains_left["path"][request]["ENFORCE"].append([sel_ind, sel_arc])
+        node_left = Node(info_fix_one, branch_constrains_left, self.path, self.bpsolver)
+
+        # forbid to use this arc in this hop
+        info_fix_zero = deepcopy(self.info)
+        branch_constrains_right = deepcopy(self.branch_constraints)
+        branch_constrains_right["path"][request]["FORBID"].append([sel_ind, sel_arc])
+        node_right = Node(info_fix_zero, branch_constrains_right, self.path, self.bpsolver)
+
+        return node_left, node_right
+
     def parse_optimal_solution(self):
         y = self.var_tuple.y
         h = self.var_tuple.h
@@ -600,10 +696,6 @@ class Node:
                 val = y[r_id, path_id].x
                 sol["path"][r].append((path, val))
         return sol
-
-    def _branch_on_path(self, path):
-
-        pass
 
 
 if __name__ == "__main__":

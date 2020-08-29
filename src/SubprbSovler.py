@@ -5,6 +5,7 @@
 @file:SubprbSovler.py
 @Desc:
 the subproplem is a shortest path problem with resource constraints, SPPRC.
+search feasible paths for a request.
 """
 from test_data import DATA
 from pprint import pprint
@@ -49,7 +50,7 @@ def parse_node(node):
         return [x.NAME for x in node]
 
 
-def parse_path(merged_label, deltas, gamma, m, epsilons):
+def parse_path(merged_label, deltas, gamma, m, epsilons, alphas, betas, branch_path_constrains):
     # print("-------------------Parse path information----------------------")
     paths = defaultdict(list)
     feasible_path = []
@@ -80,10 +81,27 @@ def parse_path(merged_label, deltas, gamma, m, epsilons):
                 backward_label = backward_label.l_bar
 
             path = Path(forward_path_reverse[::-1] + backward_path, total_cost)
-            paths[hop].append(path)
-            # print("path:{}, cost:{}".format(path.path, cost))
-            if total_cost < -0.001:
-                feasible_path.append([total_cost, path])
+            path_str = str(path.path)
+            if path_str in alphas:
+                total_cost -= alphas[path_str]
+            if path_str in betas:
+                total_cost -= betas[path_str]
+
+            hop_satisfy = True
+            for enforce_requirement in branch_path_constrains["ENFORCE"]:
+                sel_ind, sel_arc = enforce_requirement
+                if (path.path[sel_ind-1], path.path[sel_ind]) != sel_arc:
+                    hop_satisfy = False
+            for forbid_requirement in branch_path_constrains["FORBID"]:
+                sel_ind, sel_arc = forbid_requirement
+                if (path.path[sel_ind-1], path.path[sel_ind]) == sel_arc:
+                    hop_satisfy = False
+
+            if hop_satisfy:
+                paths[hop].append(path)
+                # print("path:{}, cost:{}".format(path.path, cost))
+                if total_cost < -0.001:
+                    feasible_path.append([total_cost, path])
 
     # for hop, paths in paths.items():
     #     for path in paths:
@@ -109,6 +127,19 @@ class SpSovler:
         # hop means the transmission between nodes, including origin to hub, and hub to destination.
         self.u = self.info["max_hop"]
         self.hubs = self.info['hubs']
+        if request in self.info["alphas"]:
+            self.alpha_r = self.info["alphas"][request]
+        else:
+            self.alpha_r = {}
+        if request in self.info["betas"]:
+            self.beta_r = self.info["betas"][request]
+        else:
+            self.beta_r = {}
+
+        if request in self.info["branch_path_constrains"]:
+            self.branch_path_constrains = self.info["branch_path_constrains"][request]
+        else:
+            self.branch_path_constrains = {"ENFORCE": [], "FORBID": []}
 
         self.feasible_path = []
         self.path = {}
@@ -246,7 +277,9 @@ class SpSovler:
         # print("\n")
         # pprint(dict(merged_label)[5])
 
-        paths, feasible_path = parse_path(merged_label, deltas=self.deltas, gamma=self.gamma_r, m=self.m_r, epsilons=self.epsilons)
+        paths, feasible_path = parse_path(merged_label=merged_label, deltas=self.deltas, gamma=self.gamma_r, m=self.m_r,
+                                          epsilons=self.epsilons, alphas=self.alpha_r, betas=self.beta_r,
+                                          branch_path_constrains=self.branch_path_constrains)
         return paths, feasible_path
 
 
